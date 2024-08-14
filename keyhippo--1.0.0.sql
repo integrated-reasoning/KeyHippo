@@ -19,105 +19,97 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
--- Create necessary schemas
-CREATE SCHEMA IF NOT EXISTS auth;
-
-CREATE SCHEMA IF NOT EXISTS vault;
-
--- Create jwts table in auth schema
-CREATE TABLE IF NOT EXISTS auth.jwts (
-    secret_id uuid PRIMARY KEY,
-    user_id uuid,
-    CONSTRAINT jwts_secret_id_fkey FOREIGN KEY (secret_id) REFERENCES vault.secrets (id) ON DELETE CASCADE
-);
-
--- Create user_ids table
-CREATE TABLE IF NOT EXISTS public.user_ids (
-    id uuid PRIMARY KEY
-);
-
--- Create API key related tables
-CREATE TABLE IF NOT EXISTS public.api_key_id_owner_id (
-    api_key_id uuid PRIMARY KEY,
-    user_id uuid NOT NULL,
-    owner_id uuid,
-    CONSTRAINT api_key_id_owner_id_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.user_ids (id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_owner_id_api_key_id_owner_id_key UNIQUE (api_key_id, owner_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.api_key_id_name (
-    api_key_id uuid PRIMARY KEY,
-    name text NOT NULL,
-    owner_id uuid,
-    CONSTRAINT api_key_id_name_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES public.api_key_id_owner_id (api_key_id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_name_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.api_key_id_permission (
-    api_key_id uuid PRIMARY KEY,
-    permission text NOT NULL,
-    owner_id uuid,
-    CONSTRAINT api_key_id_permission_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES public.api_key_id_owner_id (api_key_id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_permission_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.api_key_id_created (
-    api_key_id uuid PRIMARY KEY,
-    created timestamptz NOT NULL,
-    owner_id uuid,
-    CONSTRAINT api_key_id_created_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES public.api_key_id_owner_id (api_key_id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_created_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.api_key_id_last_used (
-    api_key_id uuid PRIMARY KEY,
-    last_used timestamptz,
-    owner_id uuid,
-    CONSTRAINT api_key_id_last_used_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES public.api_key_id_owner_id (api_key_id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_last_used_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.api_key_id_total_use (
-    api_key_id uuid PRIMARY KEY,
-    total_uses bigint DEFAULT 0 NOT NULL,
-    owner_id uuid,
-    CONSTRAINT api_key_id_total_use_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES public.api_key_id_owner_id (api_key_id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_total_use_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.api_key_id_success_rate (
-    api_key_id uuid PRIMARY KEY,
-    success_rate numeric(5, 2) NOT NULL,
-    owner_id uuid,
-    CONSTRAINT api_key_id_success_rate_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES public.api_key_id_owner_id (api_key_id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_success_rate_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id),
-    CONSTRAINT api_key_reference_success_rate_success_rate_check CHECK ((success_rate >= 0 AND success_rate <= 100))
-);
-
-CREATE TABLE IF NOT EXISTS public.api_key_id_total_cost (
-    api_key_id uuid PRIMARY KEY,
-    total_cost numeric(12, 2) DEFAULT 0 NOT NULL,
-    owner_id uuid,
-    CONSTRAINT api_key_id_total_cost_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES public.api_key_id_owner_id (api_key_id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_total_cost_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id)
-);
-
-CREATE TABLE IF NOT EXISTS public.api_key_id_revoked (
-    api_key_id uuid PRIMARY KEY,
-    revoked_at timestamptz DEFAULT now() NOT NULL,
-    owner_id uuid,
-    CONSTRAINT api_key_id_revoked_api_key_id_fkey FOREIGN KEY (api_key_id) REFERENCES public.api_key_id_owner_id (api_key_id) ON DELETE CASCADE,
-    CONSTRAINT api_key_id_revoked_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id)
-);
-
--- Function to set up project_api_key_secret
-CREATE OR REPLACE FUNCTION keyhippo_setup_project_api_key_secret ()
+CREATE OR REPLACE FUNCTION public.setup_keyhippo ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
     AS $$
-DECLARE
-    secret_exists boolean;
+BEGIN
+    -- Create necessary schemas
+    CREATE SCHEMA IF NOT EXISTS auth;
+    CREATE SCHEMA IF NOT EXISTS vault;
+    -- Create jwts table in auth schema
+    CREATE TABLE IF NOT EXISTS auth.jwts (
+        secret_id uuid PRIMARY KEY,
+        user_id uuid,
+        CONSTRAINT jwts_secret_id_fkey FOREIGN KEY (secret_id ) REFERENCES vault.secrets (id ) ON DELETE CASCADE
+    );
+    -- Create user_ids table
+    CREATE TABLE IF NOT EXISTS public.user_ids (
+        id uuid PRIMARY KEY
+    );
+    -- Create API key related tables
+    CREATE TABLE IF NOT EXISTS public.api_key_id_owner_id (
+        api_key_id uuid PRIMARY KEY,
+        user_id uuid NOT NULL,
+        owner_id uuid,
+        CONSTRAINT api_key_id_owner_id_user_id_fkey FOREIGN KEY (user_id ) REFERENCES public.user_ids (id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_owner_id_api_key_id_owner_id_key UNIQUE (api_key_id, owner_id )
+    );
+    CREATE TABLE IF NOT EXISTS public.api_key_id_name (
+        api_key_id uuid PRIMARY KEY,
+        name text NOT NULL,
+        owner_id uuid,
+        CONSTRAINT api_key_id_name_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_name_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+    );
+    CREATE TABLE IF NOT EXISTS public.api_key_id_permission (
+        api_key_id uuid PRIMARY KEY,
+        permission text NOT NULL,
+        owner_id uuid,
+        CONSTRAINT api_key_id_permission_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_permission_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+    );
+    CREATE TABLE IF NOT EXISTS public.api_key_id_created (
+        api_key_id uuid PRIMARY KEY,
+        created timestamptz NOT NULL,
+        owner_id uuid,
+        CONSTRAINT api_key_id_created_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_created_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+    );
+    CREATE TABLE IF NOT EXISTS public.api_key_id_last_used (
+        api_key_id uuid PRIMARY KEY,
+        last_used timestamptz,
+        owner_id uuid,
+        CONSTRAINT api_key_id_last_used_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_last_used_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+    );
+    CREATE TABLE IF NOT EXISTS public.api_key_id_total_use (
+        api_key_id uuid PRIMARY KEY,
+        total_uses bigint DEFAULT 0 NOT NULL,
+        owner_id uuid,
+        CONSTRAINT api_key_id_total_use_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_total_use_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+    );
+    CREATE TABLE IF NOT EXISTS public.api_key_id_success_rate (
+        api_key_id uuid PRIMARY KEY,
+        success_rate numeric(5, 2 ) NOT NULL,
+        owner_id uuid,
+        CONSTRAINT api_key_id_success_rate_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_success_rate_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id ),
+        CONSTRAINT api_key_reference_success_rate_success_rate_check CHECK ((success_rate >= 0 AND success_rate <= 100 ) )
+    );
+    CREATE TABLE IF NOT EXISTS public.api_key_id_total_cost (
+        api_key_id uuid PRIMARY KEY,
+        total_cost numeric(12, 2 ) DEFAULT 0 NOT NULL,
+        owner_id uuid,
+        CONSTRAINT api_key_id_total_cost_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_total_cost_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+    );
+    CREATE TABLE IF NOT EXISTS public.api_key_id_revoked (
+        api_key_id uuid PRIMARY KEY,
+        revoked_at timestamptz DEFAULT now( ) NOT NULL,
+        owner_id uuid,
+        CONSTRAINT api_key_id_revoked_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_revoked_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+    );
+    -- Function to set up project_api_key_secret
+    CREATE OR REPLACE FUNCTION keyhippo_setup_project_api_key_secret ( )
+        RETURNS VOID
+        LANGUAGE plpgsql
+        SECURITY DEFINER AS
+$$ DECLARE secret_exists boolean;
+
 BEGIN
     -- Check if the secret already exists
     SELECT
@@ -128,15 +120,21 @@ BEGIN
                 vault.secrets
             WHERE
                 name = 'project_api_key_secret') INTO secret_exists;
-    -- If the secret doesn't exist, create it
-    IF NOT secret_exists THEN
-        INSERT INTO vault.secrets (secret, name)
-            VALUES (encode(digest(gen_random_bytes(32), 'sha512'), 'hex'), 'project_api_key_secret');
-        RAISE NOTICE 'Created project_api_key_secret in vault.secrets';
-    ELSE
-        RAISE NOTICE 'project_api_key_secret already exists in vault.secrets';
-    END IF;
+
+-- If the secret doesn't exist, create it
+IF NOT secret_exists THEN
+    INSERT INTO vault.secrets (secret, name)
+        VALUES (encode(digest(gen_random_bytes(32), 'sha512'), 'hex'), 'project_api_key_secret');
+
+RAISE INFO 'Created project_api_key_secret in vault.secrets';
+
+ELSE
+    RAISE INFO 'project_api_key_secret already exists in vault.secrets';
+
+END IF;
+
 END;
+
 $$;
 
 -- Function to set up project_jwt_secret
@@ -161,9 +159,9 @@ BEGIN
     IF NOT secret_exists THEN
         INSERT INTO vault.secrets (secret, name)
             VALUES (encode(digest(gen_random_bytes(32), 'sha256'), 'hex'), 'project_jwt_secret');
-        RAISE NOTICE 'Created project_jwt_secret in vault.secrets';
+        RAISE INFO 'Created project_jwt_secret in vault.secrets';
     ELSE
-        RAISE NOTICE 'project_jwt_secret already exists in vault.secrets';
+        RAISE INFO 'project_jwt_secret already exists in vault.secrets';
     END IF;
 END;
 $$;
@@ -179,7 +177,7 @@ BEGIN
         keyhippo_setup_project_api_key_secret ();
     PERFORM
         keyhippo_setup_project_jwt_secret ();
-    RAISE NOTICE 'KeyHippo vault secrets setup complete';
+    RAISE INFO 'KeyHippo vault secrets setup complete';
 END;
 $$;
 
@@ -599,6 +597,12 @@ SELECT
     keyhippo_setup_vault_secrets ();
 
 COMMENT ON FUNCTION keyhippo_setup_vault_secrets () IS 'Run this function to set up or update KeyHippo vault secrets';
+
+RAISE INFO 'KeyHippo setup completed successfully.';
+
+END;
+
+$$;
 
 -- To ensure everything worked:
 -- SELECT * FROM vault.decrypted_secrets
