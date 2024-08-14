@@ -26,7 +26,9 @@
 -- Also, create a new user manually in supabase and run this query using their role:
 -- SELECT create_api_key('uuid-of-new-user', 'Test API Key');
 --
-CREATE OR REPLACE FUNCTION public.setup_keyhippo ()
+CREATE SCHEMA IF NOT EXISTS keyhippo;
+
+CREATE OR REPLACE FUNCTION keyhippo.setup_keyhippo ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
@@ -46,84 +48,84 @@ BEGIN
     );
     RAISE LOG '[KeyHippo] Table "auth.jwts" ensured.';
     -- Create user_ids table
-    CREATE TABLE IF NOT EXISTS public.user_ids (
+    CREATE TABLE IF NOT EXISTS keyhippo.user_ids (
         id uuid PRIMARY KEY
     );
-    RAISE LOG '[KeyHippo] Table "public.user_ids" ensured.';
+    RAISE LOG '[KeyHippo] Table "keyhippo.user_ids" ensured.';
     -- Create API key related tables
-    CREATE TABLE IF NOT EXISTS public.api_key_id_owner_id (
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_owner_id (
         api_key_id uuid PRIMARY KEY,
         user_id uuid NOT NULL,
         owner_id uuid,
-        CONSTRAINT api_key_id_owner_id_user_id_fkey FOREIGN KEY (user_id ) REFERENCES public.user_ids (id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_owner_id_user_id_fkey FOREIGN KEY (user_id ) REFERENCES keyhippo.user_ids (id ) ON DELETE CASCADE,
         CONSTRAINT api_key_id_owner_id_api_key_id_owner_id_key UNIQUE (api_key_id, owner_id )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_owner_id" ensured.';
-    CREATE TABLE IF NOT EXISTS public.api_key_id_name (
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_owner_id" ensured.';
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_name (
         api_key_id uuid PRIMARY KEY,
         name text NOT NULL,
         owner_id uuid,
-        CONSTRAINT api_key_id_name_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
-        CONSTRAINT api_key_id_name_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+        CONSTRAINT api_key_id_name_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_name_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id, owner_id )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_name" ensured.';
-    CREATE TABLE IF NOT EXISTS public.api_key_id_permission (
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_name" ensured.';
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_permission (
         api_key_id uuid PRIMARY KEY,
         permission text NOT NULL,
         owner_id uuid,
-        CONSTRAINT api_key_id_permission_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
-        CONSTRAINT api_key_id_permission_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+        CONSTRAINT api_key_id_permission_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_permission_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id, owner_id )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_permission" ensured.';
-    CREATE TABLE IF NOT EXISTS public.api_key_id_created (
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_permission" ensured.';
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_created (
         api_key_id uuid PRIMARY KEY,
         created timestamptz NOT NULL,
         owner_id uuid,
-        CONSTRAINT api_key_id_created_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
-        CONSTRAINT api_key_id_created_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+        CONSTRAINT api_key_id_created_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_created_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id, owner_id )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_created" ensured.';
-    CREATE TABLE IF NOT EXISTS public.api_key_id_last_used (
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_created" ensured.';
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_last_used (
         api_key_id uuid PRIMARY KEY,
         last_used timestamptz,
         owner_id uuid,
-        CONSTRAINT api_key_id_last_used_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
-        CONSTRAINT api_key_id_last_used_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+        CONSTRAINT api_key_id_last_used_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_last_used_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id, owner_id )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_last_used" ensured.';
-    CREATE TABLE IF NOT EXISTS public.api_key_id_total_use (
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_last_used" ensured.';
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_total_use (
         api_key_id uuid PRIMARY KEY,
         total_uses bigint DEFAULT 0 NOT NULL,
         owner_id uuid,
-        CONSTRAINT api_key_id_total_use_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
-        CONSTRAINT api_key_id_total_use_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+        CONSTRAINT api_key_id_total_use_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_total_use_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id, owner_id )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_total_use" ensured.';
-    CREATE TABLE IF NOT EXISTS public.api_key_id_success_rate (
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_total_use" ensured.';
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_success_rate (
         api_key_id uuid PRIMARY KEY,
         success_rate numeric(5, 2 ) NOT NULL,
         owner_id uuid,
-        CONSTRAINT api_key_id_success_rate_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
-        CONSTRAINT api_key_id_success_rate_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id ),
+        CONSTRAINT api_key_id_success_rate_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_success_rate_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id, owner_id ),
         CONSTRAINT api_key_reference_success_rate_success_rate_check CHECK ((success_rate >= 0 AND success_rate <= 100 ) )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_success_rate" ensured.';
-    CREATE TABLE IF NOT EXISTS public.api_key_id_total_cost (
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_success_rate" ensured.';
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_total_cost (
         api_key_id uuid PRIMARY KEY,
         total_cost numeric(12, 2 ) DEFAULT 0 NOT NULL,
         owner_id uuid,
-        CONSTRAINT api_key_id_total_cost_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
-        CONSTRAINT api_key_id_total_cost_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+        CONSTRAINT api_key_id_total_cost_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_total_cost_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id, owner_id )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_total_cost" ensured.';
-    CREATE TABLE IF NOT EXISTS public.api_key_id_revoked (
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_total_cost" ensured.';
+    CREATE TABLE IF NOT EXISTS keyhippo.api_key_id_revoked (
         api_key_id uuid PRIMARY KEY,
         revoked_at timestamptz DEFAULT now( ) NOT NULL,
         owner_id uuid,
-        CONSTRAINT api_key_id_revoked_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES public.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
-        CONSTRAINT api_key_id_revoked_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES public.api_key_id_owner_id (api_key_id, owner_id )
+        CONSTRAINT api_key_id_revoked_api_key_id_fkey FOREIGN KEY (api_key_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id ) ON DELETE CASCADE,
+        CONSTRAINT api_key_id_revoked_api_key_id_owner_id_fkey FOREIGN KEY (api_key_id, owner_id ) REFERENCES keyhippo.api_key_id_owner_id (api_key_id, owner_id )
     );
-    RAISE LOG '[KeyHippo] Table "public.api_key_id_revoked" ensured.';
+    RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_revoked" ensured.';
     -- Function to set up project_api_key_secret
     CREATE OR REPLACE FUNCTION keyhippo_setup_project_api_key_secret ( )
         RETURNS VOID
@@ -192,7 +194,7 @@ END;
 END;
     $$;
     -- Create function to generate and store API key
-    CREATE OR REPLACE FUNCTION public.create_api_key (id_of_user text, key_description text )
+    CREATE OR REPLACE FUNCTION keyhippo.create_api_key (id_of_user text, key_description text )
         RETURNS text
         LANGUAGE plpgsql
         SECURITY DEFINER AS $$
@@ -214,7 +216,7 @@ BEGIN
         RAISE EXCEPTION '[KeyHippo] Unauthorized: Invalid user ID';
     END IF;
     -- Ensure the user exists in the user_ids table
-    INSERT INTO public.user_ids (id)
+    INSERT INTO keyhippo.user_ids (id)
         VALUES (id_of_user::uuid)
     ON CONFLICT (id)
         DO NOTHING;
@@ -252,23 +254,23 @@ BEGIN
     INSERT INTO auth.jwts (secret_id, user_id)
         VALUES (secret_uuid, id_of_user::uuid);
     -- Insert into api_key_id_owner_id
-    INSERT INTO public.api_key_id_owner_id (api_key_id, user_id, owner_id)
+    INSERT INTO keyhippo.api_key_id_owner_id (api_key_id, user_id, owner_id)
         VALUES (secret_uuid, id_of_user::uuid, id_of_user::uuid);
     -- Insert into api_key_id_name
-    INSERT INTO public.api_key_id_name (api_key_id, name, owner_id)
+    INSERT INTO keyhippo.api_key_id_name (api_key_id, name, owner_id)
         VALUES (secret_uuid, key_description, id_of_user::uuid);
     -- Insert into api_key_id_permission (assuming default permission, update as needed)
-    INSERT INTO public.api_key_id_permission (api_key_id, permission, owner_id)
+    INSERT INTO keyhippo.api_key_id_permission (api_key_id, permission, owner_id)
         VALUES (secret_uuid, 'readOnly', id_of_user::uuid);
     -- Insert into api_key_id_created
-    INSERT INTO public.api_key_id_created (api_key_id, created, owner_id)
+    INSERT INTO keyhippo.api_key_id_created (api_key_id, created, owner_id)
         VALUES (secret_uuid, now(), id_of_user::uuid);
     -- Initialize other tables with default values
-    INSERT INTO public.api_key_id_total_use (api_key_id, total_uses, owner_id)
+    INSERT INTO keyhippo.api_key_id_total_use (api_key_id, total_uses, owner_id)
         VALUES (secret_uuid, 0, id_of_user::uuid);
-    INSERT INTO public.api_key_id_success_rate (api_key_id, success_rate, owner_id)
+    INSERT INTO keyhippo.api_key_id_success_rate (api_key_id, success_rate, owner_id)
         VALUES (secret_uuid, 100.00, id_of_user::uuid);
-    INSERT INTO public.api_key_id_total_cost (api_key_id, total_cost, owner_id)
+    INSERT INTO keyhippo.api_key_id_total_cost (api_key_id, total_cost, owner_id)
         VALUES (secret_uuid, 0.00, id_of_user::uuid);
     RETURN api_key;
 END;
@@ -315,7 +317,7 @@ END;
     $$;
     RAISE LOG '[KeyHippo] Function "key_uid" created.';
     -- Create function to revoke API key
-    CREATE OR REPLACE FUNCTION public.revoke_api_key (id_of_user text, secret_id text )
+    CREATE OR REPLACE FUNCTION keyhippo.revoke_api_key (id_of_user text, secret_id text )
         RETURNS VOID
         LANGUAGE plpgsql
         SECURITY DEFINER AS $$
@@ -327,7 +329,7 @@ BEGIN
         SELECT
             user_id INTO owner_id
         FROM
-            public.api_key_id_owner_id
+            keyhippo.api_key_id_owner_id
         WHERE
             api_key_id = secret_id::uuid;
         -- Check if the api_key_id exists in api_key_id_owner_id
@@ -335,7 +337,7 @@ BEGIN
             RAISE EXCEPTION '[KeyHippo] API key not found: %', secret_id;
         END IF;
         -- Insert into api_key_id_revoked table
-        INSERT INTO public.api_key_id_revoked (api_key_id, owner_id)
+        INSERT INTO keyhippo.api_key_id_revoked (api_key_id, owner_id)
             VALUES (secret_id::uuid, owner_id);
         -- Delete from vault.secrets
         DELETE FROM vault.secrets
@@ -347,7 +349,7 @@ END;
     $$;
     RAISE LOG '[KeyHippo] Function "revoke_api_key" created.';
     -- Create function to get API key metadata
-    CREATE OR REPLACE FUNCTION public.get_api_key_metadata (p_user_id uuid )
+    CREATE OR REPLACE FUNCTION keyhippo.get_api_key_metadata (p_user_id uuid )
         RETURNS TABLE (
             api_key_id uuid,
             name text,
@@ -373,15 +375,15 @@ END;
                 COALESCE(tc.total_cost, 0.0)::double PRECISION AS total_cost,
                 r.revoked_at AS revoked
             FROM
-                public.api_key_id_owner_id u
-            LEFT JOIN public.api_key_id_name n ON u.api_key_id = n.api_key_id
-            LEFT JOIN public.api_key_id_permission p ON u.api_key_id = p.api_key_id
-            LEFT JOIN public.api_key_id_last_used l ON u.api_key_id = l.api_key_id
-            LEFT JOIN public.api_key_id_created c ON u.api_key_id = c.api_key_id
-            LEFT JOIN public.api_key_id_total_use t ON u.api_key_id = t.api_key_id
-            LEFT JOIN public.api_key_id_success_rate s ON u.api_key_id = s.api_key_id
-            LEFT JOIN public.api_key_id_total_cost tc ON u.api_key_id = tc.api_key_id
-            LEFT JOIN public.api_key_id_revoked r ON u.api_key_id = r.api_key_id
+                keyhippo.api_key_id_owner_id u
+            LEFT JOIN keyhippo.api_key_id_name n ON u.api_key_id = n.api_key_id
+            LEFT JOIN keyhippo.api_key_id_permission p ON u.api_key_id = p.api_key_id
+            LEFT JOIN keyhippo.api_key_id_last_used l ON u.api_key_id = l.api_key_id
+            LEFT JOIN keyhippo.api_key_id_created c ON u.api_key_id = c.api_key_id
+            LEFT JOIN keyhippo.api_key_id_total_use t ON u.api_key_id = t.api_key_id
+            LEFT JOIN keyhippo.api_key_id_success_rate s ON u.api_key_id = s.api_key_id
+            LEFT JOIN keyhippo.api_key_id_total_cost tc ON u.api_key_id = tc.api_key_id
+            LEFT JOIN keyhippo.api_key_id_revoked r ON u.api_key_id = r.api_key_id
         WHERE
             u.user_id = p_user_id;
 END;
@@ -401,62 +403,62 @@ END;
     $$;
     RAISE LOG '[KeyHippo] Function "keyhippo_check" created.';
     -- Enable Row Level Security on all tables
-    ALTER TABLE public.api_key_id_created ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_created ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_created".';
-    ALTER TABLE public.api_key_id_last_used ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_last_used ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_last_used".';
-    ALTER TABLE public.api_key_id_name ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_name ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_name".';
-    ALTER TABLE public.api_key_id_owner_id ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_owner_id ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_owner_id".';
-    ALTER TABLE public.api_key_id_permission ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_permission ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_permission".';
-    ALTER TABLE public.api_key_id_revoked ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_revoked ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_revoked".';
-    ALTER TABLE public.api_key_id_success_rate ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_success_rate ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_success_rate".';
-    ALTER TABLE public.api_key_id_total_cost ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_total_cost ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_total_cost".';
-    ALTER TABLE public.api_key_id_total_use ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.api_key_id_total_use ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "api_key_id_total_use".';
-    ALTER TABLE public.user_ids ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE keyhippo.user_ids ENABLE ROW LEVEL SECURITY;
     RAISE LOG '[KeyHippo] Row Level Security enabled on table "user_ids".';
     -- Create RLS policies for each table
-    CREATE POLICY "select_policy_api_key_id_created" ON public.api_key_id_created
+    CREATE POLICY "select_policy_api_key_id_created" ON keyhippo.api_key_id_created
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_created" created.';
-    CREATE POLICY "select_policy_api_key_id_last_used" ON public.api_key_id_last_used
+    CREATE POLICY "select_policy_api_key_id_last_used" ON keyhippo.api_key_id_last_used
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_last_used" created.';
-    CREATE POLICY "select_policy_api_key_id_name" ON public.api_key_id_name
+    CREATE POLICY "select_policy_api_key_id_name" ON keyhippo.api_key_id_name
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_name" created.';
-    CREATE POLICY "select_policy_api_key_id_owner_id" ON public.api_key_id_owner_id
+    CREATE POLICY "select_policy_api_key_id_owner_id" ON keyhippo.api_key_id_owner_id
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_owner_id" created.';
-    CREATE POLICY "select_policy_api_key_id_permission" ON public.api_key_id_permission
+    CREATE POLICY "select_policy_api_key_id_permission" ON keyhippo.api_key_id_permission
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_permission" created.';
-    CREATE POLICY "select_policy_api_key_id_revoked" ON public.api_key_id_revoked
+    CREATE POLICY "select_policy_api_key_id_revoked" ON keyhippo.api_key_id_revoked
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_revoked" created.';
-    CREATE POLICY "select_policy_api_key_id_success_rate" ON public.api_key_id_success_rate
+    CREATE POLICY "select_policy_api_key_id_success_rate" ON keyhippo.api_key_id_success_rate
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_success_rate" created.';
-    CREATE POLICY "select_policy_api_key_id_total_cost" ON public.api_key_id_total_cost
+    CREATE POLICY "select_policy_api_key_id_total_cost" ON keyhippo.api_key_id_total_cost
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_total_cost" created.';
-    CREATE POLICY "select_policy_api_key_id_total_use" ON public.api_key_id_total_use
+    CREATE POLICY "select_policy_api_key_id_total_use" ON keyhippo.api_key_id_total_use
         USING (auth.uid ( ) = owner_id );
     RAISE LOG '[KeyHippo] Policy "select_policy_api_key_id_total_use" created.';
     -- Create triggers for user management
-    CREATE OR REPLACE FUNCTION public.handle_new_user ( )
+    CREATE OR REPLACE FUNCTION keyhippo.handle_new_user ( )
         RETURNS TRIGGER
         LANGUAGE plpgsql
         SECURITY DEFINER
         SET search_path = '' AS $$
         BEGIN
-            INSERT INTO public.user_ids (id)
+            INSERT INTO keyhippo.user_ids (id)
                 VALUES (NEW.id);
             RETURN NEW;
 END;
@@ -465,9 +467,9 @@ END;
     CREATE TRIGGER on_auth_user_created
         AFTER INSERT ON auth.users
         FOR EACH ROW
-        EXECUTE FUNCTION public.handle_new_user ( );
+        EXECUTE FUNCTION keyhippo.handle_new_user ( );
     RAISE LOG '[KeyHippo] Trigger "on_auth_user_created" created.';
-    CREATE OR REPLACE FUNCTION public.create_user_api_key_secret ( )
+    CREATE OR REPLACE FUNCTION keyhippo.create_user_api_key_secret ( )
         RETURNS TRIGGER
         LANGUAGE plpgsql
         SECURITY DEFINER
@@ -485,13 +487,13 @@ END;
     CREATE TRIGGER on_user_created__create_user_api_key_secret
         AFTER INSERT ON auth.users
         FOR EACH ROW
-        EXECUTE FUNCTION public.create_user_api_key_secret ( );
+        EXECUTE FUNCTION keyhippo.create_user_api_key_secret ( );
     RAISE LOG '[KeyHippo] Trigger "on_user_created__create_user_api_key_secret" created.';
-    CREATE OR REPLACE FUNCTION public.remove_user_vault_secrets ( )
+    CREATE OR REPLACE FUNCTION keyhippo.remove_user_vault_secrets ( )
         RETURNS TRIGGER
         LANGUAGE plpgsql
         SECURITY DEFINER
-        SET search_path = public AS $$
+        SET search_path = keyhippo AS $$
 DECLARE
     jwt_record RECORD;
 BEGIN
@@ -514,10 +516,10 @@ END;
     CREATE TRIGGER on_auth_user_deleted
         AFTER DELETE ON auth.users
         FOR EACH ROW
-        EXECUTE FUNCTION public.remove_user_vault_secrets ( );
+        EXECUTE FUNCTION keyhippo.remove_user_vault_secrets ( );
     RAISE LOG '[KeyHippo] Trigger "on_auth_user_deleted" created.';
     -- Create additional utility functions
-    CREATE OR REPLACE FUNCTION public.get_api_key (id_of_user text, secret_id text )
+    CREATE OR REPLACE FUNCTION keyhippo.get_api_key (id_of_user text, secret_id text )
         RETURNS text
         LANGUAGE plpgsql
         SECURITY DEFINER
@@ -546,7 +548,7 @@ BEGIN
 END;
     $$;
     RAISE LOG '[KeyHippo] Function "get_api_key" created.';
-    CREATE OR REPLACE FUNCTION public.load_api_key_info (id_of_user text )
+    CREATE OR REPLACE FUNCTION keyhippo.load_api_key_info (id_of_user text )
         RETURNS text[]
         LANGUAGE plpgsql
         SECURITY DEFINER
@@ -581,14 +583,14 @@ END;
     $$;
     RAISE LOG '[KeyHippo] Function "load_api_key_info" created.';
     -- Grant necessary permissions
-    GRANT USAGE ON SCHEMA public TO authenticated;
-    GRANT USAGE ON SCHEMA public TO anon;
-    GRANT ALL ON FUNCTION public.create_api_key (TEXT, TEXT) TO authenticated;
-    GRANT ALL ON FUNCTION public.revoke_api_key (TEXT, TEXT) TO authenticated;
-    GRANT ALL ON FUNCTION public.get_api_key_metadata (UUID) TO authenticated;
-    GRANT ALL ON FUNCTION public.get_api_key (TEXT, TEXT) TO authenticated;
-    GRANT ALL ON FUNCTION public.load_api_key_info (TEXT) TO authenticated;
-    GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
+    GRANT USAGE ON SCHEMA keyhippo TO authenticated;
+    GRANT USAGE ON SCHEMA keyhippo TO anon;
+    GRANT ALL ON FUNCTION keyhippo.create_api_key (TEXT, TEXT) TO authenticated;
+    GRANT ALL ON FUNCTION keyhippo.revoke_api_key (TEXT, TEXT) TO authenticated;
+    GRANT ALL ON FUNCTION keyhippo.get_api_key_metadata (UUID) TO authenticated;
+    GRANT ALL ON FUNCTION keyhippo.get_api_key (TEXT, TEXT) TO authenticated;
+    GRANT ALL ON FUNCTION keyhippo.load_api_key_info (TEXT) TO authenticated;
+    GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo TO authenticated;
     -- Set up vault secrets
     PERFORM
         keyhippo_setup_vault_secrets ();
@@ -597,7 +599,7 @@ END;
 END;
 $setup$;
 
-CREATE OR REPLACE FUNCTION public.uninstall_keyhippo ()
+CREATE OR REPLACE FUNCTION keyhippo.uninstall_keyhippo ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
@@ -606,57 +608,59 @@ BEGIN
     -- Log the start of the uninstallation
     RAISE LOG '[KeyHippo] Starting KeyHippo uninstallation...';
     -- Drop Row Level Security policies from KeyHippo tables
-    DROP POLICY IF EXISTS "select_policy_api_key_id_created" ON public.api_key_id_created;
-    DROP POLICY IF EXISTS "select_policy_api_key_id_last_used" ON public.api_key_id_last_used;
-    DROP POLICY IF EXISTS "select_policy_api_key_id_name" ON public.api_key_id_name;
-    DROP POLICY IF EXISTS "select_policy_api_key_id_owner_id" ON public.api_key_id_owner_id;
-    DROP POLICY IF EXISTS "select_policy_api_key_id_permission" ON public.api_key_id_permission;
-    DROP POLICY IF EXISTS "select_policy_api_key_id_revoked" ON public.api_key_id_revoked;
-    DROP POLICY IF EXISTS "select_policy_api_key_id_success_rate" ON public.api_key_id_success_rate;
-    DROP POLICY IF EXISTS "select_policy_api_key_id_total_cost" ON public.api_key_id_total_cost;
-    DROP POLICY IF EXISTS "select_policy_api_key_id_total_use" ON public.api_key_id_total_use;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_created" ON keyhippo.api_key_id_created;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_last_used" ON keyhippo.api_key_id_last_used;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_name" ON keyhippo.api_key_id_name;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_owner_id" ON keyhippo.api_key_id_owner_id;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_permission" ON keyhippo.api_key_id_permission;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_revoked" ON keyhippo.api_key_id_revoked;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_success_rate" ON keyhippo.api_key_id_success_rate;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_total_cost" ON keyhippo.api_key_id_total_cost;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_total_use" ON keyhippo.api_key_id_total_use;
     -- Disable Row Level Security on KeyHippo tables
-    ALTER TABLE IF EXISTS public.api_key_id_created DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.api_key_id_last_used DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.api_key_id_name DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.api_key_id_owner_id DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.api_key_id_permission DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.api_key_id_revoked DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.api_key_id_success_rate DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.api_key_id_total_cost DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.api_key_id_total_use DISABLE ROW LEVEL SECURITY;
-    ALTER TABLE IF EXISTS public.user_ids DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_created DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_last_used DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_name DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_owner_id DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_permission DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_revoked DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_success_rate DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_total_cost DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.api_key_id_total_use DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS keyhippo.user_ids DISABLE ROW LEVEL SECURITY;
     -- Drop triggers specifically created by KeyHippo
     DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
     DROP TRIGGER IF EXISTS on_user_created__create_user_api_key_secret ON auth.users;
     DROP TRIGGER IF EXISTS on_auth_user_deleted ON auth.users;
     -- Drop functions specifically created by KeyHippo
-    DROP FUNCTION IF EXISTS public.handle_new_user ();
-    DROP FUNCTION IF EXISTS public.create_user_api_key_secret ();
-    DROP FUNCTION IF EXISTS public.remove_user_vault_secrets ();
-    DROP FUNCTION IF EXISTS public.create_api_key (TEXT, TEXT);
-    DROP FUNCTION IF EXISTS public.revoke_api_key (TEXT, TEXT);
-    DROP FUNCTION IF EXISTS public.get_api_key_metadata (UUID);
-    DROP FUNCTION IF EXISTS public.get_api_key (TEXT, TEXT);
-    DROP FUNCTION IF EXISTS public.load_api_key_info (TEXT);
-    DROP FUNCTION IF EXISTS public.key_uid ();
-    DROP FUNCTION IF EXISTS keyhippo_setup_project_api_key_secret ();
-    DROP FUNCTION IF EXISTS keyhippo_setup_project_jwt_secret ();
-    DROP FUNCTION IF EXISTS keyhippo_setup_vault_secrets ();
+    DROP FUNCTION IF EXISTS keyhippo.handle_new_user ();
+    DROP FUNCTION IF EXISTS keyhippo.create_user_api_key_secret ();
+    DROP FUNCTION IF EXISTS keyhippo.remove_user_vault_secrets ();
+    DROP FUNCTION IF EXISTS keyhippo.create_api_key (TEXT, TEXT);
+    DROP FUNCTION IF EXISTS keyhippo.revoke_api_key (TEXT, TEXT);
+    DROP FUNCTION IF EXISTS keyhippo.get_api_key_metadata (UUID);
+    DROP FUNCTION IF EXISTS keyhippo.get_api_key (TEXT, TEXT);
+    DROP FUNCTION IF EXISTS keyhippo.load_api_key_info (TEXT);
+    DROP FUNCTION IF EXISTS keyhippo.key_uid ();
+    DROP FUNCTION IF EXISTS keyhippo.keyhippo_setup_project_api_key_secret ();
+    DROP FUNCTION IF EXISTS keyhippo.keyhippo_setup_project_jwt_secret ();
+    DROP FUNCTION IF EXISTS keyhippo.keyhippo_setup_vault_secrets ();
     DROP FUNCTION IF EXISTS auth.keyhippo_check (UUID);
     -- Drop KeyHippo-specific tables
-    DROP TABLE IF EXISTS public.api_key_id_created CASCADE;
-    DROP TABLE IF EXISTS public.api_key_id_last_used CASCADE;
-    DROP TABLE IF EXISTS public.api_key_id_name CASCADE;
-    DROP TABLE IF EXISTS public.api_key_id_owner_id CASCADE;
-    DROP TABLE IF EXISTS public.api_key_id_permission CASCADE;
-    DROP TABLE IF EXISTS public.api_key_id_revoked CASCADE;
-    DROP TABLE IF EXISTS public.api_key_id_success_rate CASCADE;
-    DROP TABLE IF EXISTS public.api_key_id_total_cost CASCADE;
-    DROP TABLE IF EXISTS public.api_key_id_total_use CASCADE;
-    DROP TABLE IF EXISTS public.user_ids CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_created CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_last_used CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_name CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_owner_id CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_permission CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_revoked CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_success_rate CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_total_cost CASCADE;
+    DROP TABLE IF EXISTS keyhippo.api_key_id_total_use CASCADE;
+    DROP TABLE IF EXISTS keyhippo.user_ids CASCADE;
+    -- Drop the jwts table in the auth schema
     DROP TABLE IF EXISTS auth.jwts CASCADE;
-    -- Do not drop the auth schema, only clean up the objects created by KeyHippo
+    -- Drop the keyhippo schema if it exists
+    DROP SCHEMA IF EXISTS keyhippo CASCADE;
     -- Log the completion of the uninstallation
     RAISE LOG '[KeyHippo] KeyHippo uninstallation completed successfully.';
 END;
