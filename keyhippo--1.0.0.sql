@@ -583,7 +583,7 @@ END;
     GRANT ALL ON FUNCTION public.load_api_key_info (TEXT) TO authenticated;
     GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
     -- Set up vault secrets
-    SELECT
+    PERFORM
         keyhippo_setup_vault_secrets ();
     COMMENT ON FUNCTION keyhippo_setup_vault_secrets () IS 'Run this function to set up or update KeyHippo vault secrets';
     RAISE LOG '[KeyHippo] KeyHippo setup completed successfully.';
