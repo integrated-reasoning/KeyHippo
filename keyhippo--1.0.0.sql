@@ -19,6 +19,13 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+-- To ensure everything is working after setup():
+-- SELECT * FROM vault.decrypted_secrets
+-- WHERE name IN ('project_api_key_secret', 'project_jwt_secret');
+--
+-- Also, create a new user manually in supabase and run this query using their role:
+-- SELECT create_api_key('uuid-of-new-user', 'Test API Key');
+--
 CREATE OR REPLACE FUNCTION public.setup_keyhippo ()
     RETURNS VOID
     LANGUAGE plpgsql
@@ -590,9 +597,67 @@ END;
 END;
 $setup$;
 
--- To ensure everything worked:
--- SELECT * FROM vault.decrypted_secrets
--- WHERE name IN ('project_api_key_secret', 'project_jwt_secret');
---
--- Also, create a new user manually in supabase and run this query using their role:
--- SELECT create_api_key('uuid-of-new-user', 'Test API Key');
+CREATE OR REPLACE FUNCTION public.uninstall_keyhippo ()
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $uninstall$
+BEGIN
+    -- Log the start of the uninstallation
+    RAISE LOG '[KeyHippo] Starting KeyHippo uninstallation...';
+    -- Drop Row Level Security policies from KeyHippo tables
+    DROP POLICY IF EXISTS "select_policy_api_key_id_created" ON public.api_key_id_created;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_last_used" ON public.api_key_id_last_used;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_name" ON public.api_key_id_name;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_owner_id" ON public.api_key_id_owner_id;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_permission" ON public.api_key_id_permission;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_revoked" ON public.api_key_id_revoked;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_success_rate" ON public.api_key_id_success_rate;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_total_cost" ON public.api_key_id_total_cost;
+    DROP POLICY IF EXISTS "select_policy_api_key_id_total_use" ON public.api_key_id_total_use;
+    -- Disable Row Level Security on KeyHippo tables
+    ALTER TABLE IF EXISTS public.api_key_id_created DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.api_key_id_last_used DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.api_key_id_name DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.api_key_id_owner_id DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.api_key_id_permission DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.api_key_id_revoked DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.api_key_id_success_rate DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.api_key_id_total_cost DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.api_key_id_total_use DISABLE ROW LEVEL SECURITY;
+    ALTER TABLE IF EXISTS public.user_ids DISABLE ROW LEVEL SECURITY;
+    -- Drop triggers specifically created by KeyHippo
+    DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+    DROP TRIGGER IF EXISTS on_user_created__create_user_api_key_secret ON auth.users;
+    DROP TRIGGER IF EXISTS on_auth_user_deleted ON auth.users;
+    -- Drop functions specifically created by KeyHippo
+    DROP FUNCTION IF EXISTS public.handle_new_user ();
+    DROP FUNCTION IF EXISTS public.create_user_api_key_secret ();
+    DROP FUNCTION IF EXISTS public.remove_user_vault_secrets ();
+    DROP FUNCTION IF EXISTS public.create_api_key (TEXT, TEXT);
+    DROP FUNCTION IF EXISTS public.revoke_api_key (TEXT, TEXT);
+    DROP FUNCTION IF EXISTS public.get_api_key_metadata (UUID);
+    DROP FUNCTION IF EXISTS public.get_api_key (TEXT, TEXT);
+    DROP FUNCTION IF EXISTS public.load_api_key_info (TEXT);
+    DROP FUNCTION IF EXISTS public.key_uid ();
+    DROP FUNCTION IF EXISTS keyhippo_setup_project_api_key_secret ();
+    DROP FUNCTION IF EXISTS keyhippo_setup_project_jwt_secret ();
+    DROP FUNCTION IF EXISTS keyhippo_setup_vault_secrets ();
+    DROP FUNCTION IF EXISTS auth.keyhippo_check (UUID);
+    -- Drop KeyHippo-specific tables
+    DROP TABLE IF EXISTS public.api_key_id_created CASCADE;
+    DROP TABLE IF EXISTS public.api_key_id_last_used CASCADE;
+    DROP TABLE IF EXISTS public.api_key_id_name CASCADE;
+    DROP TABLE IF EXISTS public.api_key_id_owner_id CASCADE;
+    DROP TABLE IF EXISTS public.api_key_id_permission CASCADE;
+    DROP TABLE IF EXISTS public.api_key_id_revoked CASCADE;
+    DROP TABLE IF EXISTS public.api_key_id_success_rate CASCADE;
+    DROP TABLE IF EXISTS public.api_key_id_total_cost CASCADE;
+    DROP TABLE IF EXISTS public.api_key_id_total_use CASCADE;
+    DROP TABLE IF EXISTS public.user_ids CASCADE;
+    DROP TABLE IF EXISTS auth.jwts CASCADE;
+    -- Do not drop the auth schema, only clean up the objects created by KeyHippo
+    -- Log the completion of the uninstallation
+    RAISE LOG '[KeyHippo] KeyHippo uninstallation completed successfully.';
+END;
+$uninstall$;
