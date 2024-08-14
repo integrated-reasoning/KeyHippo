@@ -23,7 +23,7 @@ CREATE OR REPLACE FUNCTION public.setup_keyhippo ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
-    AS $$
+    AS $setup$
 BEGIN
     -- Create necessary schemas
     CREATE SCHEMA IF NOT EXISTS auth;
@@ -107,9 +107,9 @@ BEGIN
     CREATE OR REPLACE FUNCTION keyhippo_setup_project_api_key_secret ( )
         RETURNS VOID
         LANGUAGE plpgsql
-        SECURITY DEFINER AS
-$$ DECLARE secret_exists boolean;
-
+        SECURITY DEFINER AS $$
+DECLARE
+    secret_exists boolean;
 BEGIN
     -- Check if the secret already exists
     SELECT
@@ -120,29 +120,21 @@ BEGIN
                 vault.secrets
             WHERE
                 name = 'project_api_key_secret') INTO secret_exists;
-
--- If the secret doesn't exist, create it
-IF NOT secret_exists THEN
-    INSERT INTO vault.secrets (secret, name)
-        VALUES (encode(digest(gen_random_bytes(32), 'sha512'), 'hex'), 'project_api_key_secret');
-
-RAISE INFO 'Created project_api_key_secret in vault.secrets';
-
-ELSE
-    RAISE INFO 'project_api_key_secret already exists in vault.secrets';
-
-END IF;
-
+    -- If the secret doesn't exist, create it
+    IF NOT secret_exists THEN
+        INSERT INTO vault.secrets (secret, name)
+            VALUES (encode(digest(gen_random_bytes(32), 'sha512'), 'hex'), 'project_api_key_secret');
+        RAISE INFO 'Created project_api_key_secret in vault.secrets';
+    ELSE
+        RAISE INFO 'project_api_key_secret already exists in vault.secrets';
+    END IF;
 END;
-
-$$;
-
--- Function to set up project_jwt_secret
-CREATE OR REPLACE FUNCTION keyhippo_setup_project_jwt_secret ()
-    RETURNS VOID
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    AS $$
+    $$;
+    -- Function to set up project_jwt_secret
+    CREATE OR REPLACE FUNCTION keyhippo_setup_project_jwt_secret ( )
+        RETURNS VOID
+        LANGUAGE plpgsql
+        SECURITY DEFINER AS $$
 DECLARE
     secret_exists boolean;
 BEGIN
@@ -164,29 +156,25 @@ BEGIN
         RAISE INFO 'project_jwt_secret already exists in vault.secrets';
     END IF;
 END;
-$$;
-
--- Function to set up both secrets
-CREATE OR REPLACE FUNCTION keyhippo_setup_vault_secrets ()
-    RETURNS VOID
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    AS $$
-BEGIN
-    PERFORM
-        keyhippo_setup_project_api_key_secret ();
-    PERFORM
-        keyhippo_setup_project_jwt_secret ();
-    RAISE INFO 'KeyHippo vault secrets setup complete';
+    $$;
+    -- Function to set up both secrets
+    CREATE OR REPLACE FUNCTION keyhippo_setup_vault_secrets ( )
+        RETURNS VOID
+        LANGUAGE plpgsql
+        SECURITY DEFINER AS $$
+        BEGIN
+            PERFORM
+                keyhippo_setup_project_api_key_secret ();
+            PERFORM
+                keyhippo_setup_project_jwt_secret ();
+            RAISE INFO 'KeyHippo vault secrets setup complete';
 END;
-$$;
-
--- Create function to generate and store API key
-CREATE OR REPLACE FUNCTION public.create_api_key (id_of_user text, key_description text)
-    RETURNS text
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    AS $$
+    $$;
+    -- Create function to generate and store API key
+    CREATE OR REPLACE FUNCTION public.create_api_key (id_of_user text, key_description text )
+        RETURNS text
+        LANGUAGE plpgsql
+        SECURITY DEFINER AS $$
 DECLARE
     api_key text;
     expires bigint;
@@ -263,14 +251,12 @@ BEGIN
         VALUES (secret_uuid, 0.00, id_of_user::uuid);
     RETURN api_key;
 END;
-$$;
-
--- Create function to validate API key
-CREATE OR REPLACE FUNCTION auth.key_uid ()
-    RETURNS uuid
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    AS $$
+    $$;
+    -- Create function to validate API key
+    CREATE OR REPLACE FUNCTION auth.key_uid ( )
+        RETURNS uuid
+        LANGUAGE plpgsql
+        SECURITY DEFINER AS $$
 DECLARE
     project_hash text;
     project_api_key_secret text;
@@ -304,14 +290,12 @@ BEGIN
         RETURN NULL;
     END IF;
 END;
-$$;
-
--- Create function to revoke API key
-CREATE OR REPLACE FUNCTION public.revoke_api_key (id_of_user text, secret_id text)
-    RETURNS VOID
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    AS $$
+    $$;
+    -- Create function to revoke API key
+    CREATE OR REPLACE FUNCTION public.revoke_api_key (id_of_user text, secret_id text )
+        RETURNS VOID
+        LANGUAGE plpgsql
+        SECURITY DEFINER AS $$
 DECLARE
     owner_id uuid;
 BEGIN
@@ -337,134 +321,110 @@ BEGIN
         RAISE EXCEPTION 'Unauthorized: Invalid user ID';
     END IF;
 END;
-$$;
-
--- Create function to get API key metadata
-CREATE OR REPLACE FUNCTION public.get_api_key_metadata (p_user_id uuid)
-    RETURNS TABLE (
-        api_key_id uuid,
-        name text,
-        permission text,
-        last_used timestamptz,
-        created timestamptz,
-        total_uses bigint,
-        success_rate double precision,
-        total_cost double precision,
-        revoked timestamptz)
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-    RETURN QUERY
-    SELECT
-        u.api_key_id,
-        n.name,
-        p.permission,
-        l.last_used,
-        c.created,
-        COALESCE(t.total_uses, 0) AS total_uses,
-        COALESCE(s.success_rate, 0.0)::double PRECISION AS success_rate,
-        COALESCE(tc.total_cost, 0.0)::double PRECISION AS total_cost,
-        r.revoked_at AS revoked
-    FROM
-        public.api_key_id_owner_id u
-    LEFT JOIN public.api_key_id_name n ON u.api_key_id = n.api_key_id
-    LEFT JOIN public.api_key_id_permission p ON u.api_key_id = p.api_key_id
-    LEFT JOIN public.api_key_id_last_used l ON u.api_key_id = l.api_key_id
-    LEFT JOIN public.api_key_id_created c ON u.api_key_id = c.api_key_id
-    LEFT JOIN public.api_key_id_total_use t ON u.api_key_id = t.api_key_id
-    LEFT JOIN public.api_key_id_success_rate s ON u.api_key_id = s.api_key_id
-    LEFT JOIN public.api_key_id_total_cost tc ON u.api_key_id = tc.api_key_id
-    LEFT JOIN public.api_key_id_revoked r ON u.api_key_id = r.api_key_id
-WHERE
-    u.user_id = p_user_id;
+    $$;
+    -- Create function to get API key metadata
+    CREATE OR REPLACE FUNCTION public.get_api_key_metadata (p_user_id uuid )
+        RETURNS TABLE (
+            api_key_id uuid,
+            name text,
+            permission text,
+            last_used timestamptz,
+            created timestamptz,
+            total_uses bigint,
+            success_rate double precision,
+            total_cost double precision,
+            revoked timestamptz )
+        LANGUAGE plpgsql
+        AS $$
+        BEGIN
+            RETURN QUERY
+            SELECT
+                u.api_key_id,
+                n.name,
+                p.permission,
+                l.last_used,
+                c.created,
+                COALESCE(t.total_uses, 0) AS total_uses,
+                COALESCE(s.success_rate, 0.0)::double PRECISION AS success_rate,
+                COALESCE(tc.total_cost, 0.0)::double PRECISION AS total_cost,
+                r.revoked_at AS revoked
+            FROM
+                public.api_key_id_owner_id u
+            LEFT JOIN public.api_key_id_name n ON u.api_key_id = n.api_key_id
+            LEFT JOIN public.api_key_id_permission p ON u.api_key_id = p.api_key_id
+            LEFT JOIN public.api_key_id_last_used l ON u.api_key_id = l.api_key_id
+            LEFT JOIN public.api_key_id_created c ON u.api_key_id = c.api_key_id
+            LEFT JOIN public.api_key_id_total_use t ON u.api_key_id = t.api_key_id
+            LEFT JOIN public.api_key_id_success_rate s ON u.api_key_id = s.api_key_id
+            LEFT JOIN public.api_key_id_total_cost tc ON u.api_key_id = tc.api_key_id
+            LEFT JOIN public.api_key_id_revoked r ON u.api_key_id = r.api_key_id
+        WHERE
+            u.user_id = p_user_id;
 END;
-$$;
-
--- Create helper function for RLS
-CREATE OR REPLACE FUNCTION auth.keyhippo_check (owner_id uuid)
-    RETURNS boolean
-    LANGUAGE sql
-    SECURITY DEFINER
-    AS $$
-    SELECT
-        (auth.uid () = owner_id)
-        OR (auth.key_uid () = owner_id);
-$$;
-
--- Enable Row Level Security on all tables
-ALTER TABLE public.api_key_id_created ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.api_key_id_last_used ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.api_key_id_name ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.api_key_id_owner_id ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.api_key_id_permission ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.api_key_id_revoked ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.api_key_id_success_rate ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.api_key_id_total_cost ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.api_key_id_total_use ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.user_ids ENABLE ROW LEVEL SECURITY;
-
--- Create RLS policies for each table
-CREATE POLICY "select_policy_api_key_id_created" ON public.api_key_id_created
-    USING (auth.uid () = owner_id);
-
-CREATE POLICY "select_policy_api_key_id_last_used" ON public.api_key_id_last_used
-    USING (auth.uid () = owner_id);
-
-CREATE POLICY "select_policy_api_key_id_name" ON public.api_key_id_name
-    USING (auth.uid () = owner_id);
-
-CREATE POLICY "select_policy_api_key_id_owner_id" ON public.api_key_id_owner_id
-    USING (auth.uid () = owner_id);
-
-CREATE POLICY "select_policy_api_key_id_permission" ON public.api_key_id_permission
-    USING (auth.uid () = owner_id);
-
-CREATE POLICY "select_policy_api_key_id_revoked" ON public.api_key_id_revoked
-    USING (auth.uid () = owner_id);
-
-CREATE POLICY "select_policy_api_key_id_success_rate" ON public.api_key_id_success_rate
-    USING (auth.uid () = owner_id);
-
-CREATE POLICY "select_policy_api_key_id_total_cost" ON public.api_key_id_total_cost
-    USING (auth.uid () = owner_id);
-
-CREATE POLICY "select_policy_api_key_id_total_use" ON public.api_key_id_total_use
-    USING (auth.uid () = owner_id);
-
--- Create triggers for user management
-CREATE OR REPLACE FUNCTION public.handle_new_user ()
-    RETURNS TRIGGER
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    SET search_path = ''
-    AS $$
-BEGIN
-    INSERT INTO public.user_ids (id)
-        VALUES (NEW.id);
-    RETURN NEW;
+    $$;
+    -- Create helper function for RLS
+    CREATE OR REPLACE FUNCTION auth.keyhippo_check (owner_id uuid )
+        RETURNS boolean
+        LANGUAGE sql
+        SECURITY DEFINER AS $$
+        SELECT
+            (
+                auth.uid ( ) = owner_id )
+            OR (
+                auth.key_uid ( ) = owner_id
+            );
+    $$;
+    -- Enable Row Level Security on all tables
+    ALTER TABLE public.api_key_id_created ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.api_key_id_last_used ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.api_key_id_name ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.api_key_id_owner_id ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.api_key_id_permission ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.api_key_id_revoked ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.api_key_id_success_rate ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.api_key_id_total_cost ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.api_key_id_total_use ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.user_ids ENABLE ROW LEVEL SECURITY;
+    -- Create RLS policies for each table
+    CREATE POLICY "select_policy_api_key_id_created" ON public.api_key_id_created
+        USING (auth.uid ( ) = owner_id );
+    CREATE POLICY "select_policy_api_key_id_last_used" ON public.api_key_id_last_used
+        USING (auth.uid ( ) = owner_id );
+    CREATE POLICY "select_policy_api_key_id_name" ON public.api_key_id_name
+        USING (auth.uid ( ) = owner_id );
+    CREATE POLICY "select_policy_api_key_id_owner_id" ON public.api_key_id_owner_id
+        USING (auth.uid ( ) = owner_id );
+    CREATE POLICY "select_policy_api_key_id_permission" ON public.api_key_id_permission
+        USING (auth.uid ( ) = owner_id );
+    CREATE POLICY "select_policy_api_key_id_revoked" ON public.api_key_id_revoked
+        USING (auth.uid ( ) = owner_id );
+    CREATE POLICY "select_policy_api_key_id_success_rate" ON public.api_key_id_success_rate
+        USING (auth.uid ( ) = owner_id );
+    CREATE POLICY "select_policy_api_key_id_total_cost" ON public.api_key_id_total_cost
+        USING (auth.uid ( ) = owner_id );
+    CREATE POLICY "select_policy_api_key_id_total_use" ON public.api_key_id_total_use
+        USING (auth.uid ( ) = owner_id );
+    -- Create triggers for user management
+    CREATE OR REPLACE FUNCTION public.handle_new_user ( )
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = '' AS $$
+        BEGIN
+            INSERT INTO public.user_ids (id)
+                VALUES (NEW.id);
+            RETURN NEW;
 END;
-$$;
-
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW
-    EXECUTE FUNCTION public.handle_new_user ();
-
-CREATE OR REPLACE FUNCTION public.create_user_api_key_secret ()
-    RETURNS TRIGGER
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    SET search_path = extensions
-    AS $$
+    $$;
+    CREATE TRIGGER on_auth_user_created
+        AFTER INSERT ON auth.users
+        FOR EACH ROW
+        EXECUTE FUNCTION public.handle_new_user ( );
+    CREATE OR REPLACE FUNCTION public.create_user_api_key_secret ( )
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = extensions AS $$
 DECLARE
     rand_bytes bytea := gen_random_bytes(32);
     user_api_key_secret text := encode(digest(rand_bytes, 'sha512'), 'hex');
@@ -473,19 +433,16 @@ BEGIN
         VALUES (user_api_key_secret, NEW.id);
     RETURN NEW;
 END;
-$$;
-
-CREATE TRIGGER on_user_created__create_user_api_key_secret
-    AFTER INSERT ON auth.users
-    FOR EACH ROW
-    EXECUTE FUNCTION public.create_user_api_key_secret ();
-
-CREATE OR REPLACE FUNCTION public.remove_user_vault_secrets ()
-    RETURNS TRIGGER
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    SET search_path = public
-    AS $$
+    $$;
+    CREATE TRIGGER on_user_created__create_user_api_key_secret
+        AFTER INSERT ON auth.users
+        FOR EACH ROW
+        EXECUTE FUNCTION public.create_user_api_key_secret ( );
+    CREATE OR REPLACE FUNCTION public.remove_user_vault_secrets ( )
+        RETURNS TRIGGER
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = public AS $$
 DECLARE
     jwt_record RECORD;
 BEGIN
@@ -503,20 +460,17 @@ BEGIN
         END LOOP;
     RETURN OLD;
 END;
-$$;
-
-CREATE TRIGGER on_auth_user_deleted
-    AFTER DELETE ON auth.users
-    FOR EACH ROW
-    EXECUTE FUNCTION public.remove_user_vault_secrets ();
-
--- Create additional utility functions
-CREATE OR REPLACE FUNCTION public.get_api_key (id_of_user text, secret_id text)
-    RETURNS text
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    SET search_path = extensions
-    AS $$
+    $$;
+    CREATE TRIGGER on_auth_user_deleted
+        AFTER DELETE ON auth.users
+        FOR EACH ROW
+        EXECUTE FUNCTION public.remove_user_vault_secrets ( );
+    -- Create additional utility functions
+    CREATE OR REPLACE FUNCTION public.get_api_key (id_of_user text, secret_id text )
+        RETURNS text
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = extensions AS $$
 DECLARE
     jwt text;
     key TEXT;
@@ -539,14 +493,12 @@ BEGIN
     END IF;
     RETURN key;
 END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.load_api_key_info (id_of_user text)
-    RETURNS text[]
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    SET search_path = extensions
-    AS $$
+    $$;
+    CREATE OR REPLACE FUNCTION public.load_api_key_info (id_of_user text )
+        RETURNS text[]
+        LANGUAGE plpgsql
+        SECURITY DEFINER
+        SET search_path = extensions AS $$
 DECLARE
     current_set jsonb;
     jwt_record RECORD;
@@ -574,35 +526,22 @@ BEGIN
     END IF;
     RETURN key_info;
 END;
-$$;
-
--- Grant necessary permissions
-GRANT USAGE ON SCHEMA public TO authenticated;
-
-GRANT USAGE ON SCHEMA public TO anon;
-
-GRANT ALL ON FUNCTION public.create_api_key (TEXT, TEXT) TO authenticated;
-
-GRANT ALL ON FUNCTION public.revoke_api_key (TEXT, TEXT) TO authenticated;
-
-GRANT ALL ON FUNCTION public.get_api_key_metadata (UUID) TO authenticated;
-
-GRANT ALL ON FUNCTION public.get_api_key (TEXT, TEXT) TO authenticated;
-
-GRANT ALL ON FUNCTION public.load_api_key_info (TEXT) TO authenticated;
-
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
-
-SELECT
-    keyhippo_setup_vault_secrets ();
-
-COMMENT ON FUNCTION keyhippo_setup_vault_secrets () IS 'Run this function to set up or update KeyHippo vault secrets';
-
-RAISE INFO 'KeyHippo setup completed successfully.';
-
+    $$;
+    -- Grant necessary permissions
+    GRANT USAGE ON SCHEMA public TO authenticated;
+    GRANT USAGE ON SCHEMA public TO anon;
+    GRANT ALL ON FUNCTION public.create_api_key (TEXT, TEXT) TO authenticated;
+    GRANT ALL ON FUNCTION public.revoke_api_key (TEXT, TEXT) TO authenticated;
+    GRANT ALL ON FUNCTION public.get_api_key_metadata (UUID) TO authenticated;
+    GRANT ALL ON FUNCTION public.get_api_key (TEXT, TEXT) TO authenticated;
+    GRANT ALL ON FUNCTION public.load_api_key_info (TEXT) TO authenticated;
+    GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
+    SELECT
+        keyhippo_setup_vault_secrets ();
+    COMMENT ON FUNCTION keyhippo_setup_vault_secrets () IS 'Run this function to set up or update KeyHippo vault secrets';
+    RAISE INFO 'KeyHippo setup completed successfully.';
 END;
-
-$$;
+$setup$;
 
 -- To ensure everything worked:
 -- SELECT * FROM vault.decrypted_secrets
