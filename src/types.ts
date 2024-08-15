@@ -1,11 +1,5 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 
-export interface KeyHippoConfig {
-  supabaseUrl: string;
-  supabaseAnonKey: string;
-  logger?: Logger;
-}
-
 export interface Logger {
   info: (message: string) => void;
   warn: (message: string) => void;
