@@ -660,3 +660,14 @@ BEGIN
     RAISE LOG '[KeyHippo] KeyHippo uninstallation completed successfully.';
 END;
 $uninstall$;
+
+SELECT
+    keyhippo.setup ();
+
+DROP FUNCTION keyhippo.setup ();
+
+DROP FUNCTION keyhippo.setup_vault_secrets ();
+
+DROP FUNCTION keyhippo.setup_project_jwt_secret ();
+
+DROP FUNCTION keyhippo.setup_project_api_key_secret ();
