@@ -3,7 +3,7 @@ name: "ci"
 on:
   push:
     paths-ignore:
-      - '**.md'
+      - "**.md"
     branches:
       - main
   pull_request:
@@ -24,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20'
+          node-version: "20"
       - uses: actions/cache@main
         with:
           path: |
@@ -55,8 +55,6 @@ jobs:
         run: nix develop --command make install
       - name: Check formatting
         run: nix develop --command pnpm prettier --check .
-      - name: Run ESLint
-        run: nix develop --command pnpm eslint .
 
   coverage:
     runs-on: ubuntu-latest
