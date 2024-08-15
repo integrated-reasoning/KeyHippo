@@ -266,7 +266,7 @@ END;
     $$;
     RAISE LOG '[KeyHippo] Function "create_api_key" created.';
     -- Create function to validate API key
-    CREATE OR REPLACE FUNCTION auth.key_uid ( )
+    CREATE OR REPLACE FUNCTION keyhippo.key_uid ( )
         RETURNS uuid
         LANGUAGE plpgsql
         SECURITY DEFINER AS $$
@@ -387,7 +387,7 @@ END;
             (
                 auth.uid ( ) = owner_id )
             OR (
-                auth.key_uid ( ) = owner_id
+                keyhippo.key_uid ( ) = owner_id
             );
     $$;
     RAISE LOG '[KeyHippo] Function "keyhippo_check" created.';
