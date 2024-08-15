@@ -2,6 +2,11 @@
   "name": "keyhippo",
   "version": "0.0.4",
   "description": "Issue API keys for your Supabase app with one line of SQL",
+  "main": "dist/index.ts",
+  "types": "dist/index.d.ts",
+  "scripts": {
+      "build": "tsc"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/integrated-reasoning/KeyHippo.git"
@@ -18,5 +23,15 @@
   "bugs": {
     "url": "https://github.com/integrated-reasoning/KeyHippo/issues"
   },
-  "homepage": "https://keyhippo.com"
+  "homepage": "https://keyhippo.com",
+  "dependencies": {
+  },
+  "devDependencies": {
+    "typescript": "5.3.3",
+    "@types/node": "20.11.5"
+  },
+  "peerDependencies": {
+    "@supabase/ssr": "^0.3.0",
+    "@supabase/supabase-js": "^2.44.4"
+  }
 }
