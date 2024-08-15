@@ -29,10 +29,6 @@ CREATE OR REPLACE FUNCTION keyhippo.setup ()
 BEGIN
     -- Log the start of the setup
     RAISE LOG '[KeyHippo] Starting KeyHippo setup...';
-    -- Create necessary schemas
-    CREATE SCHEMA IF NOT EXISTS auth;
-    CREATE SCHEMA IF NOT EXISTS vault;
-    RAISE LOG '[KeyHippo] Schemas "auth" and "vault" ensured.';
     -- Create jwts table in auth schema
     CREATE TABLE IF NOT EXISTS auth.jwts (
         secret_id uuid PRIMARY KEY,
