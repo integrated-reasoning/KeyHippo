@@ -17,7 +17,6 @@ export const createApiKey = (
 ): Effect.Effect<CompleteApiKeyInfo, AppError> => {
   const uniqueId = uuidv4();
   const uniqueDescription = `${uniqueId}-${keyDescription}`;
-
   return pipe(
     Effect.tryPromise({
       try: () =>
@@ -49,35 +48,37 @@ export const createApiKey = (
       return Effect.succeed(createdKeyInfo);
     }),
     Effect.flatMap((keyInfo) =>
-      Effect.tryPromise({
-        try: () =>
-          supabase.schema("keyhippo").rpc("get_api_key", {
-            id_of_user: userId,
-            secret_id: keyInfo.id,
+      pipe(
+        Effect.tryPromise({
+          try: () =>
+            supabase.schema("keyhippo").rpc("get_api_key", {
+              id_of_user: userId,
+              secret_id: keyInfo.id,
+            }),
+          catch: (error): AppError => ({
+            _tag: "DatabaseError",
+            message: `Failed to retrieve API key: ${String(error)}`,
           }),
-        catch: (error): AppError => ({
-          _tag: "DatabaseError",
-          message: `Failed to retrieve API key: ${String(error)}`,
         }),
-      }),
-    ),
-    Effect.map(
-      (response: PostgrestSingleResponse<unknown>): CompleteApiKeyInfo => {
-        if (response.error) {
-          throw new Error(
-            `Failed to retrieve API key: ${response.error.message}`,
-          );
-        }
-        if (typeof response.data !== "string") {
-          throw new Error("Invalid API key format returned");
-        }
-        return {
-          id: uniqueId,
-          description: uniqueDescription,
-          apiKey: response.data,
-          status: "success",
-        };
-      },
+        Effect.map(
+          (response: PostgrestSingleResponse<unknown>): CompleteApiKeyInfo => {
+            if (response.error) {
+              throw new Error(
+                `Failed to retrieve API key: ${response.error.message}`,
+              );
+            }
+            if (typeof response.data !== "string") {
+              throw new Error("Invalid API key format returned");
+            }
+            return {
+              id: keyInfo.id,
+              description: uniqueDescription,
+              apiKey: response.data,
+              status: "success",
+            };
+          },
+        ),
+      ),
     ),
     Effect.tap((completeKeyInfo: CompleteApiKeyInfo) =>
       Effect.sync(() =>

@@ -12,7 +12,6 @@ beforeAll(async () => {
     process.env.SUPABASE_ANON_KEY!,
   );
   const { data, error } = await supabase.auth.signInAnonymously();
-  console.log(data, error);
   keyHippo = new KeyHippo(supabase, console);
   userId = data.user!.id;
 });
