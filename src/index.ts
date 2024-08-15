@@ -1,5 +1,5 @@
-import { SupabaseClient, createClient } from "@supabase/supabase-js";
-import { Effect, pipe } from "effect";
+import { SupabaseClient } from "@supabase/supabase-js";
+import { Effect } from "effect";
 import { v4 as uuidv4 } from "uuid";
 import {
   createApiKey as createApiKeyEffect,
@@ -8,18 +8,13 @@ import {
   getAllKeyMetadata as getAllKeyMetadataEffect,
 } from "./apiKey";
 import { authenticate as authenticateEffect } from "./auth";
-import { KeyHippoConfig, Logger, AppError } from "./types";
-
-export * from "./types";
+import { Logger, AppError } from "./types";
 
 export class KeyHippo {
-  private supabase: SupabaseClient;
-  private logger: Logger;
-
-  constructor(config: KeyHippoConfig) {
-    this.supabase = createClient(config.supabaseUrl, config.supabaseAnonKey);
-    this.logger = config.logger || console;
-  }
+  constructor(
+    private supabase: SupabaseClient,
+    private logger: Logger = console,
+  ) {}
 
   async createApiKey(userId: string, keyDescription: string) {
     const uniqueId = uuidv4();

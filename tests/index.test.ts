@@ -1,20 +1,20 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { KeyHippo, KeyHippoConfig } from "../src/index";
-
-const config: KeyHippoConfig = {
-  supabaseUrl: process.env.SUPABASE_URL!,
-  supabaseAnonKey: process.env.SUPABASE_ANON_KEY!,
-  logger: console,
-};
+import { KeyHippo } from "../src/index";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 let keyHippo: KeyHippo;
 let userId: string;
+let supabase: SupabaseClient;
 
 beforeAll(async () => {
-  keyHippo = new KeyHippo(config);
-  // TODO: create an anonymous user and delete at end of testing
-  // TODO: create a second anonymous user to test key scoping (A != B)
-  userId = "fc9ce7ab-81cb-4f6e-8af6-8a901cdfb4ac";
+  supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!,
+  );
+  const { data, error } = await supabase.auth.signInAnonymously();
+  console.log(data, error);
+  keyHippo = new KeyHippo(supabase, console);
+  userId = data.user!.id;
 });
 
 afterAll(async () => {
@@ -43,18 +43,6 @@ describe("KeyHippo Integration Tests", () => {
     expect(keyInfos.length).toBeGreaterThan(0);
     expect(keyInfos[0]).toHaveProperty("id");
     expect(keyInfos[0]).toHaveProperty("description");
-  });
-
-  it("should revoke an API key", async () => {
-    const keyDescription = "Key to be revoked";
-    const createdKey = await keyHippo.createApiKey(userId, keyDescription);
-
-    await keyHippo.revokeApiKey(userId, createdKey.id);
-
-    const keyInfos = await keyHippo.loadApiKeyInfo(userId);
-    const revokedKey = keyInfos.find((key) => key.id === createdKey.id);
-
-    expect(revokedKey).toBeUndefined();
   });
 
   it("should get all key metadata", async () => {
@@ -88,6 +76,18 @@ describe("KeyHippo Integration Tests", () => {
     expect(authResult).toHaveProperty("userId");
     expect(authResult).toHaveProperty("supabase");
     expect(authResult.userId).toBe(userId);
+  });
+
+  it("should revoke an API key", async () => {
+    const keyDescription = "Key to be revoked";
+    const createdKey = await keyHippo.createApiKey(userId, keyDescription);
+
+    await keyHippo.revokeApiKey(userId, createdKey.id);
+
+    const keyInfos = await keyHippo.loadApiKeyInfo(userId);
+    const revokedKey = keyInfos.find((key) => key.id === createdKey.id);
+
+    expect(revokedKey).toBeUndefined();
   });
 
   it("should handle errors when creating an invalid API key", async () => {
