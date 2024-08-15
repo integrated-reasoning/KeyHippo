@@ -31,26 +31,28 @@ jobs:
             ~/.npm
             ~/.pnpm-store
             node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('**/pnpm-lock.yaml') }}
       - name: Install dependencies
-        run: nix develop --command pnpm install
+        run: nix develop --command make install
       - name: Build project
-        run: nix develop --command pnpm build
+        run: nix develop --command make build
       - name: Run tests
-        run: nix develop --command pnpm test
+        run: nix develop --command make test
 
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@v3
       - uses: DeterminateSystems/nix-installer-action@main
-      - uses: actions/cache@main
+      - uses: actions/cache@v3
         with:
           path: |
             ~/.npm
             ~/.pnpm-store
             node_modules
-          key: ${{ runner.os }}-node-lint-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-node-lint-${{ hashFiles('**/pnpm-lock.yaml') }}
+      - name: Install dependencies
+        run: nix develop --command make install
       - name: Check formatting
         run: nix develop --command pnpm prettier --check .
       - name: Run ESLint
@@ -59,19 +61,19 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@v3
       - uses: DeterminateSystems/nix-installer-action@main
-      - uses: actions/cache@main
+      - uses: actions/cache@v3
         with:
           path: |
             ~/.npm
             ~/.pnpm-store
             node_modules
-          key: ${{ runner.os }}-node-coverage-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml') }}
+          key: ${{ runner.os }}-node-coverage-${{ hashFiles('**/pnpm-lock.yaml') }}
       - name: Install dependencies
-        run: nix develop --command pnpm install
+        run: nix develop --command make install
       - name: Generate code coverage
-        run: nix develop --command pnpm test --coverage
+        run: nix develop --command pnpm run test --coverage
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
