@@ -19,16 +19,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
--- To ensure everything is working after setup():
--- SELECT * FROM vault.decrypted_secrets
--- WHERE name IN ('project_api_key_secret', 'project_jwt_secret');
---
--- Also, create a new user manually in supabase and run this query using their role:
--- SELECT create_api_key('uuid-of-new-user', 'Test API Key');
---
 CREATE SCHEMA IF NOT EXISTS keyhippo;
 
-CREATE OR REPLACE FUNCTION keyhippo.setup_keyhippo ()
+CREATE OR REPLACE FUNCTION keyhippo.setup ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
@@ -127,7 +120,7 @@ BEGIN
     );
     RAISE LOG '[KeyHippo] Table "keyhippo.api_key_id_revoked" ensured.';
     -- Function to set up project_api_key_secret
-    CREATE OR REPLACE FUNCTION keyhippo_setup_project_api_key_secret ( )
+    CREATE OR REPLACE FUNCTION keyhippo.setup_project_api_key_secret ( )
         RETURNS VOID
         LANGUAGE plpgsql
         SECURITY DEFINER AS $$
@@ -154,7 +147,7 @@ BEGIN
 END;
     $$;
     -- Function to set up project_jwt_secret
-    CREATE OR REPLACE FUNCTION keyhippo_setup_project_jwt_secret ( )
+    CREATE OR REPLACE FUNCTION keyhippo.setup_project_jwt_secret ( )
         RETURNS VOID
         LANGUAGE plpgsql
         SECURITY DEFINER AS $$
@@ -181,15 +174,15 @@ BEGIN
 END;
     $$;
     -- Function to set up both secrets
-    CREATE OR REPLACE FUNCTION keyhippo_setup_vault_secrets ( )
+    CREATE OR REPLACE FUNCTION keyhippo.setup_vault_secrets ( )
         RETURNS VOID
         LANGUAGE plpgsql
         SECURITY DEFINER AS $$
         BEGIN
             PERFORM
-                keyhippo_setup_project_api_key_secret ();
+                keyhippo.setup_project_api_key_secret ();
             PERFORM
-                keyhippo_setup_project_jwt_secret ();
+                keyhippo.setup_project_jwt_secret ();
             RAISE LOG '[KeyHippo] KeyHippo vault secrets setup complete';
 END;
     $$;
@@ -349,7 +342,7 @@ END;
     $$;
     RAISE LOG '[KeyHippo] Function "revoke_api_key" created.';
     -- Create function to get API key metadata
-    CREATE OR REPLACE FUNCTION keyhippo.get_api_key_metadata (p_user_id uuid )
+    CREATE OR REPLACE FUNCTION keyhippo.get_api_key_metadata (id_of_user uuid )
         RETURNS TABLE (
             api_key_id uuid,
             name text,
@@ -385,7 +378,7 @@ END;
             LEFT JOIN keyhippo.api_key_id_total_cost tc ON u.api_key_id = tc.api_key_id
             LEFT JOIN keyhippo.api_key_id_revoked r ON u.api_key_id = r.api_key_id
         WHERE
-            u.user_id = p_user_id;
+            u.user_id = id_of_user;
 END;
     $$;
     RAISE LOG '[KeyHippo] Function "get_api_key_metadata" created.';
@@ -593,13 +586,13 @@ END;
     GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo TO authenticated;
     -- Set up vault secrets
     PERFORM
-        keyhippo_setup_vault_secrets ();
-    COMMENT ON FUNCTION keyhippo_setup_vault_secrets () IS 'Run this function to set up or update KeyHippo vault secrets';
+        keyhippo.setup_vault_secrets ();
+    COMMENT ON FUNCTION keyhippo.setup_vault_secrets () IS 'Run this function to set up or update KeyHippo vault secrets';
     RAISE LOG '[KeyHippo] KeyHippo setup completed successfully.';
 END;
 $setup$;
 
-CREATE OR REPLACE FUNCTION keyhippo.uninstall_keyhippo ()
+CREATE OR REPLACE FUNCTION keyhippo.destructive_uninstall_keyhippo_with_cascade ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
@@ -642,9 +635,9 @@ BEGIN
     DROP FUNCTION IF EXISTS keyhippo.get_api_key (TEXT, TEXT);
     DROP FUNCTION IF EXISTS keyhippo.load_api_key_info (TEXT);
     DROP FUNCTION IF EXISTS keyhippo.key_uid ();
-    DROP FUNCTION IF EXISTS keyhippo.keyhippo_setup_project_api_key_secret ();
-    DROP FUNCTION IF EXISTS keyhippo.keyhippo_setup_project_jwt_secret ();
-    DROP FUNCTION IF EXISTS keyhippo.keyhippo_setup_vault_secrets ();
+    DROP FUNCTION IF EXISTS keyhippo.setup_project_api_key_secret ();
+    DROP FUNCTION IF EXISTS keyhippo.setup_project_jwt_secret ();
+    DROP FUNCTION IF EXISTS keyhippo.setup_vault_secrets ();
     DROP FUNCTION IF EXISTS auth.keyhippo_check (UUID);
     -- Drop KeyHippo-specific tables
     DROP TABLE IF EXISTS keyhippo.api_key_id_created CASCADE;
@@ -661,6 +654,8 @@ BEGIN
     DROP TABLE IF EXISTS auth.jwts CASCADE;
     -- Drop the keyhippo schema if it exists
     DROP SCHEMA IF EXISTS keyhippo CASCADE;
+    -- Drop the keyhippo extension if it exists
+    DROP EXTENSION IF EXISTS "keyhippo@keyhippo" CASCADE;
     -- Log the completion of the uninstallation
     RAISE LOG '[KeyHippo] KeyHippo uninstallation completed successfully.';
 END;
