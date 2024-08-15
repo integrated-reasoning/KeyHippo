@@ -1,0 +1,80 @@
+name: "ci"
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize]
+
+env:
+  NODE_ENV: development
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@main
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+      - uses: actions/cache@main
+        with:
+          path: |
+            ~/.npm
+            ~/.pnpm-store
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml') }}
+      - name: Install dependencies
+        run: nix develop --command pnpm install
+      - name: Build project
+        run: nix develop --command pnpm build
+      - name: Run tests
+        run: nix develop --command pnpm test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/cache@main
+        with:
+          path: |
+            ~/.npm
+            ~/.pnpm-store
+            node_modules
+          key: ${{ runner.os }}-node-lint-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml') }}
+      - name: Check formatting
+        run: nix develop --command pnpm prettier --check .
+      - name: Run ESLint
+        run: nix develop --command pnpm eslint .
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/cache@main
+        with:
+          path: |
+            ~/.npm
+            ~/.pnpm-store
+            node_modules
+          key: ${{ runner.os }}-node-coverage-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml') }}
+      - name: Install dependencies
+        run: nix develop --command pnpm install
+      - name: Generate code coverage
+        run: nix develop --command pnpm test --coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          fail_ci_if_error: true
