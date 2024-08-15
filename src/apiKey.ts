@@ -21,7 +21,7 @@ export const createApiKey = (
   return pipe(
     Effect.tryPromise({
       try: () =>
-        supabase.rpc("create_api_key", {
+        supabase.schema("keyhippo").rpc("create_api_key", {
           id_of_user: userId,
           key_description: uniqueDescription,
         }),
@@ -51,7 +51,7 @@ export const createApiKey = (
     Effect.flatMap((keyInfo) =>
       Effect.tryPromise({
         try: () =>
-          supabase.rpc("get_api_key", {
+          supabase.schema("keyhippo").rpc("get_api_key", {
             id_of_user: userId,
             secret_id: keyInfo.id,
           }),
@@ -101,7 +101,10 @@ export const loadApiKeyInfo = (
 ): Effect.Effect<ApiKeyInfo[], AppError> =>
   pipe(
     Effect.tryPromise({
-      try: () => supabase.rpc("load_api_key_info", { id_of_user: userId }),
+      try: () =>
+        supabase
+          .schema("keyhippo")
+          .rpc("load_api_key_info", { id_of_user: userId }),
       catch: (error): AppError => ({
         _tag: "DatabaseError",
         message: `Failed to load API key info: ${String(error)}`,
@@ -162,7 +165,7 @@ export const revokeApiKey = (
   pipe(
     Effect.tryPromise({
       try: () =>
-        supabase.rpc("revoke_api_key", {
+        supabase.schema("keyhippo").rpc("revoke_api_key", {
           id_of_user: userId,
           secret_id: secretId,
         }),
@@ -203,7 +206,9 @@ export const getAllKeyMetadata = (
     Effect.tryPromise({
       try: () => {
         logger.debug(`Calling get_api_key_metadata RPC for user: ${userId}`);
-        return supabase.rpc("get_api_key_metadata", { p_user_id: userId });
+        return supabase
+          .schema("keyhippo")
+          .rpc("get_api_key_metadata", { id_of_user: userId });
       },
       catch: (error): AppError => {
         logger.error(`Error in RPC call: ${String(error)}`);

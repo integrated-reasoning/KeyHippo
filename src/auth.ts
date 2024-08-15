@@ -13,10 +13,9 @@ export const authenticate = (
         const authHeader = request.headers.get("Authorization");
         if (authHeader && authHeader.startsWith("Bearer ")) {
           const apiKey = authHeader.split(" ")[1];
-          const { data: userId, error: apiKeyError } = await supabase.rpc(
-            "get_uid_for_key",
-            { user_api_key: apiKey },
-          );
+          const { data: userId, error: apiKeyError } = await supabase
+            .schema("keyhippo")
+            .rpc("get_uid_for_key", { user_api_key: apiKey });
 
           if (apiKeyError) throw apiKeyError;
           if (!userId) {
