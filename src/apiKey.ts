@@ -1,62 +1,23 @@
 import { Effect, pipe } from "effect";
-import { PostgrestSingleResponse } from "@supabase/supabase-js";
-import { SupabaseClient } from "@supabase/supabase-js";
 import { v4 as uuidv4 } from "uuid";
+import { SupabaseClient, PostgrestSingleResponse } from "@supabase/supabase-js";
 import {
   ApiKeyInfo,
+  ApiKeyMetadata,
   CompleteApiKeyInfo,
   AppError,
-  ApiKeyMetadata,
+  Logger,
 } from "./types";
 
 export const createApiKey = (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   keyDescription: string,
+  logger: Logger,
 ): Effect.Effect<CompleteApiKeyInfo, AppError> => {
-  // This should only ever be called during key creation.
-  const getApiKey = (
-    supabase: SupabaseClient<any, "public", any>,
-    userId: string,
-    secretId: string,
-  ): Effect.Effect<string, AppError> =>
-    pipe(
-      Effect.tryPromise({
-        try: () =>
-          supabase.rpc("get_api_key", {
-            id_of_user: userId,
-            secret_id: secretId,
-          }),
-        catch: (error): AppError => ({
-          _tag: "DatabaseError",
-          message: `Failed to get API key: ${String(error)}`,
-        }),
-      }),
-      Effect.flatMap((result: any) => {
-        if (result.error) {
-          return Effect.fail<AppError>({
-            _tag: "DatabaseError",
-            message: `Error getting API key: ${result.error.message}`,
-          });
-        }
-
-        if (typeof result.data !== "string" || result.data.trim() === "") {
-          console.error("Invalid or empty API key returned:", result.data);
-          return Effect.fail<AppError>({
-            _tag: "DatabaseError",
-            message: "Invalid or empty API key returned",
-          });
-        }
-        return Effect.succeed(result.data);
-      }),
-      Effect.tapError((error) =>
-        Effect.logError(
-          `Failed to get API key: ${JSON.stringify(error, null, 2)}`,
-        ),
-      ),
-    );
   const uniqueId = uuidv4();
   const uniqueDescription = `${uniqueId}-${keyDescription}`;
+
   return pipe(
     Effect.tryPromise({
       try: () =>
@@ -69,9 +30,11 @@ export const createApiKey = (
         message: `Failed to create API key: ${String(error)}`,
       }),
     }),
-    Effect.flatMap(() => loadApiKeyInfo(supabase, userId)),
+    Effect.flatMap(() => loadApiKeyInfo(supabase, userId, logger)),
     Effect.tap((keyInfos) =>
-      Effect.logInfo(`Loaded key info: ${JSON.stringify(keyInfos)}`),
+      Effect.sync(() =>
+        logger.info(`Loaded key info: ${JSON.stringify(keyInfos)}`),
+      ),
     ),
     Effect.flatMap((keyInfos) => {
       const createdKeyInfo = keyInfos.find(
@@ -85,33 +48,48 @@ export const createApiKey = (
       }
       return Effect.succeed(createdKeyInfo);
     }),
-    Effect.flatMap((createdKeyInfo) =>
-      pipe(
-        getApiKey(supabase, userId, createdKeyInfo.id),
-        Effect.map(
-          (apiKey): CompleteApiKeyInfo => ({
-            ...createdKeyInfo,
-            apiKey, // Key creation is the one and only time we return a key.
-            status: "success",
+    Effect.flatMap((keyInfo) =>
+      Effect.tryPromise({
+        try: () =>
+          supabase.rpc("get_api_key", {
+            id_of_user: userId,
+            secret_id: keyInfo.id,
           }),
-        ),
-        Effect.catchAll((error) =>
-          Effect.succeed<CompleteApiKeyInfo>({
-            ...createdKeyInfo,
-            apiKey: null,
-            status: "failed",
-            error: error.message,
-          }),
-        ),
-      ),
+        catch: (error): AppError => ({
+          _tag: "DatabaseError",
+          message: `Failed to retrieve API key: ${String(error)}`,
+        }),
+      }),
+    ),
+    Effect.map(
+      (response: PostgrestSingleResponse<unknown>): CompleteApiKeyInfo => {
+        if (response.error) {
+          throw new Error(
+            `Failed to retrieve API key: ${response.error.message}`,
+          );
+        }
+        if (typeof response.data !== "string") {
+          throw new Error("Invalid API key format returned");
+        }
+        return {
+          id: uniqueId,
+          description: uniqueDescription,
+          apiKey: response.data,
+          status: "success",
+        };
+      },
     ),
     Effect.tap((completeKeyInfo: CompleteApiKeyInfo) =>
-      Effect.logInfo(
-        `New API key created for user: ${userId}, Key ID: ${completeKeyInfo.id}`,
+      Effect.sync(() =>
+        logger.info(
+          `New API key created for user: ${userId}, Key ID: ${completeKeyInfo.id}`,
+        ),
       ),
     ),
     Effect.tapError((error: AppError) =>
-      Effect.logError(`Failed to create new API key: ${error.message}`),
+      Effect.sync(() =>
+        logger.error(`Failed to create new API key: ${error.message}`),
+      ),
     ),
   );
 };
@@ -119,6 +97,7 @@ export const createApiKey = (
 export const loadApiKeyInfo = (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
+  logger: Logger,
 ): Effect.Effect<ApiKeyInfo[], AppError> =>
   pipe(
     Effect.tryPromise({
@@ -128,7 +107,7 @@ export const loadApiKeyInfo = (
         message: `Failed to load API key info: ${String(error)}`,
       }),
     }),
-    Effect.flatMap((result: PostgrestSingleResponse<unknown>) => {
+    Effect.flatMap((result: any) => {
       if (result.error) {
         return Effect.fail<AppError>({
           _tag: "DatabaseError",
@@ -161,12 +140,16 @@ export const loadApiKeyInfo = (
       }
     }),
     Effect.tap((apiKeyInfo: ApiKeyInfo[]) =>
-      Effect.logInfo(
-        `API key info loaded for user: ${userId}. Count: ${apiKeyInfo.length}`,
+      Effect.sync(() =>
+        logger.info(
+          `API key info loaded for user: ${userId}. Count: ${apiKeyInfo.length}`,
+        ),
       ),
     ),
     Effect.tapError((error: AppError) =>
-      Effect.logError(`Failed to load API key info: ${error.message}`),
+      Effect.sync(() =>
+        logger.error(`Failed to load API key info: ${error.message}`),
+      ),
     ),
   );
 
@@ -174,6 +157,7 @@ export const revokeApiKey = (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   secretId: string,
+  logger: Logger,
 ): Effect.Effect<void, AppError> =>
   pipe(
     Effect.tryPromise({
@@ -197,79 +181,81 @@ export const revokeApiKey = (
       return Effect.succeed(undefined);
     }),
     Effect.tap(() =>
-      Effect.logInfo(
-        `API key revoked for user: ${userId}, Secret ID: ${secretId}`,
+      Effect.sync(() =>
+        logger.info(
+          `API key revoked for user: ${userId}, Secret ID: ${secretId}`,
+        ),
       ),
     ),
     Effect.tapError((error: AppError) =>
-      Effect.logError(`Failed to revoke API key: ${error.message}`),
+      Effect.sync(() =>
+        logger.error(`Failed to revoke API key: ${error.message}`),
+      ),
     ),
   );
 
 export const getAllKeyMetadata = (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
+  logger: Logger,
 ): Effect.Effect<ApiKeyMetadata[], AppError> =>
   pipe(
     Effect.tryPromise({
       try: () => {
-        console.log(`Calling get_api_key_metadata RPC for user: ${userId}`);
-        console.log(
-          `RPC call parameters: ${JSON.stringify({ p_user_id: userId })}`,
-        );
+        logger.debug(`Calling get_api_key_metadata RPC for user: ${userId}`);
         return supabase.rpc("get_api_key_metadata", { p_user_id: userId });
       },
       catch: (error): AppError => {
-        console.error(`Error in RPC call: ${String(error)}`);
+        logger.error(`Error in RPC call: ${String(error)}`);
         return {
           _tag: "DatabaseError",
           message: `Failed to get API key metadata: ${String(error)}`,
         };
       },
     }),
-    Effect.tap((result: any) => {
-      console.log(`RPC result: ${JSON.stringify(result)}`);
-      return Effect.logDebug(`RPC result: ${JSON.stringify(result)}`);
-    }),
-    Effect.flatMap((result: any) => {
+    Effect.tap((result: any) =>
+      Effect.sync(() => logger.debug(`RPC result: ${JSON.stringify(result)}`)),
+    ),
+    Effect.flatMap((result: PostgrestSingleResponse<unknown>) => {
       if (result.error) {
-        console.error(`Database error: ${result.error.message}`);
+        logger.error(`Database error: ${result.error.message}`);
         return Effect.fail<AppError>({
           _tag: "DatabaseError",
           message: `Error getting API key metadata: ${result.error.message}`,
         });
       }
-      console.log(`Raw data from database: ${JSON.stringify(result.data)}`);
+      logger.debug(`Raw data from database: ${JSON.stringify(result.data)}`);
       if (!Array.isArray(result.data)) {
-        console.error(`Invalid data structure: ${JSON.stringify(result.data)}`);
+        logger.error(`Invalid data structure: ${JSON.stringify(result.data)}`);
         return Effect.fail<AppError>({
           _tag: "DatabaseError",
           message: "Invalid data returned when getting API key metadata",
         });
       }
-      const metadata: ApiKeyMetadata[] = result.data.map((item: any) => {
-        console.log(`Processing item: ${JSON.stringify(item)}`);
-        return {
-          api_key_reference: item.api_key_reference,
-          name: item.name || "",
-          permission: item.permission || "",
-          last_used: item.last_used,
-          created: item.created,
-          revoked: item.revoked,
-          total_uses: Number(item.total_uses),
-          success_rate: Number(item.success_rate),
-          total_cost: Number(item.total_cost),
-        };
-      });
-      console.log(`Processed metadata: ${JSON.stringify(metadata)}`);
+      const metadata: ApiKeyMetadata[] = result.data.map((item: any) => ({
+        api_key_reference: item.api_key_reference,
+        name: item.name || "",
+        permission: item.permission || "",
+        last_used: item.last_used,
+        created: item.created,
+        revoked: item.revoked,
+        total_uses: Number(item.total_uses),
+        success_rate: Number(item.success_rate),
+        total_cost: Number(item.total_cost),
+      }));
+      logger.debug(`Processed metadata: ${JSON.stringify(metadata)}`);
       return Effect.succeed(metadata);
     }),
     Effect.tap((metadata: ApiKeyMetadata[]) =>
-      Effect.logInfo(`API key metadata retrieved. Count: ${metadata.length}`),
+      Effect.sync(() =>
+        logger.info(`API key metadata retrieved. Count: ${metadata.length}`),
+      ),
     ),
     Effect.tapError((error: AppError) =>
-      Effect.logError(
-        `Failed to get API key metadata: ${JSON.stringify(error)}`,
+      Effect.sync(() =>
+        logger.error(
+          `Failed to get API key metadata: ${JSON.stringify(error)}`,
+        ),
       ),
     ),
   );

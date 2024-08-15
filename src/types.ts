@@ -1,5 +1,18 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 
+export interface KeyHippoConfig {
+  supabaseUrl: string;
+  supabaseAnonKey: string;
+  logger?: Logger;
+}
+
+export interface Logger {
+  info: (message: string) => void;
+  warn: (message: string) => void;
+  error: (message: string) => void;
+  debug: (message: string) => void;
+}
+
 export type ApiKeyResponse = {
   api_key: string;
 };
@@ -40,10 +53,11 @@ export type ApiKeyMetadata = {
   total_cost: number;
 };
 
-export type AppError = {
-  _tag: "DatabaseError" | "UnauthorizedError";
-  message: string;
-};
+export type AppError =
+  | { _tag: "DatabaseError"; message: string }
+  | { _tag: "UnauthorizedError"; message: string }
+  | { _tag: "ValidationError"; message: string }
+  | { _tag: "NetworkError"; message: string };
 
 export type AuthResult = {
   userId: string;
