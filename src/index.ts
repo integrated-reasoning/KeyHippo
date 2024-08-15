@@ -1,13 +1,14 @@
 import { SupabaseClient, createClient } from "@supabase/supabase-js";
-import { Effect } from "effect";
+import { Effect, pipe } from "effect";
+import { v4 as uuidv4 } from "uuid";
 import {
-  createApiKey,
-  loadApiKeyInfo,
-  revokeApiKey,
-  getAllKeyMetadata,
+  createApiKey as createApiKeyEffect,
+  loadApiKeyInfo as loadApiKeyInfoEffect,
+  revokeApiKey as revokeApiKeyEffect,
+  getAllKeyMetadata as getAllKeyMetadataEffect,
 } from "./apiKey";
-import { authenticate } from "./auth";
-import { KeyHippoConfig, Logger } from "./types";
+import { authenticate as authenticateEffect } from "./auth";
+import { KeyHippoConfig, Logger, AppError } from "./types";
 
 export * from "./types";
 
@@ -20,31 +21,48 @@ export class KeyHippo {
     this.logger = config.logger || console;
   }
 
-  createApiKey(userId: string, keyDescription: string) {
+  async createApiKey(userId: string, keyDescription: string) {
+    const uniqueId = uuidv4();
+    const uniqueDescription = `${uniqueId}-${keyDescription}`;
     return Effect.runPromise(
-      createApiKey(this.supabase, userId, keyDescription, this.logger),
+      Effect.catchAll(
+        createApiKeyEffect(
+          this.supabase,
+          userId,
+          uniqueDescription,
+          this.logger,
+        ),
+        (error: AppError) =>
+          Effect.fail(`Error creating API key: ${error.message}`),
+      ),
     );
   }
 
-  loadApiKeyInfo(userId: string) {
+  async loadApiKeyInfo(userId: string) {
     return Effect.runPromise(
-      loadApiKeyInfo(this.supabase, userId, this.logger),
+      loadApiKeyInfoEffect(this.supabase, userId, this.logger),
     );
   }
 
-  revokeApiKey(userId: string, secretId: string) {
+  async revokeApiKey(userId: string, secretId: string) {
     return Effect.runPromise(
-      revokeApiKey(this.supabase, userId, secretId, this.logger),
+      revokeApiKeyEffect(this.supabase, userId, secretId, this.logger),
     );
   }
 
-  getAllKeyMetadata(userId: string) {
+  async getAllKeyMetadata(userId: string) {
     return Effect.runPromise(
-      getAllKeyMetadata(this.supabase, userId, this.logger),
+      Effect.catchAll(
+        getAllKeyMetadataEffect(this.supabase, userId, this.logger),
+        (error: AppError) =>
+          Effect.fail(`Error getting API key metadata: ${error.message}`),
+      ),
     );
   }
 
-  authenticate(request: Request) {
-    return Effect.runPromise(authenticate(request, this.supabase, this.logger));
+  async authenticate(request: Request) {
+    return Effect.runPromise(
+      authenticateEffect(request, this.supabase, this.logger),
+    );
   }
 }

@@ -5,7 +5,8 @@
   "main": "dist/index.ts",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "vitest"
   },
   "repository": {
     "type": "git",
@@ -32,8 +33,10 @@
   "devDependencies": {
     "@types/node": "20.11.5",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^1.6.0",
     "prettier": "^3.3.3",
-    "typescript": "5.3.3"
+    "typescript": "5.3.3",
+    "vitest": "^1.6.0"
   },
   "peerDependencies": {
     "@supabase/ssr": "^0.3.0",
