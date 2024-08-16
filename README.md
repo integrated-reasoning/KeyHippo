@@ -6,7 +6,7 @@ KeyHippo extends Supabase's Row Level Security (RLS) framework, enabling seamles
 
 KeyHippo addresses the challenge of incorporating API key authentication in Supabase applications without compromising the integrity of Row Level Security. It achieves this by extending the RLS framework to encompass both session-based and API key authentication methods within a unified security context. This approach eliminates the need for parallel security structures and maintains granular access control across authentication types.
 
-Key aspects:
+Top features:
 - Unified RLS policies supporting dual authentication methods
 - SQL-based API key issuance
 - Preservation of existing Supabase RLS implementations
@@ -20,8 +20,7 @@ Key aspects:
 
    ```sql
    select dbdev.install('keyhippo@keyhippo');
-   create extension "keyhippo@keyhippo"
-       version '0.0.5';
+   create extension "keyhippo@keyhippo" version '0.0.5';
    ```
 
    Consult [database.dev](https://database.dev/keyhippo/keyhippo) for version updates.
@@ -68,6 +67,109 @@ This policy grants access when the user is authenticated via a session token (`a
 - `loadApiKeyInfo`: Retrieve metadata for existing keys
 - `getAllKeyMetadata`: Comprehensive metadata for a user's API keys
 
+## Process Diagrams
+
+### API Key Creation Process
+
+KeyHippo ensures that API keys are never stored in any form and cannot be reconstructed, even with access to the database. 
+
+```mermaid
+sequenceDiagram
+    title: API Key Creation
+    autonumber
+    participant B as Browser
+    participant S as Server
+    participant A as Auth Service
+    participant V as Supabase Vault
+    participant K as KeyHippo (Postgres)
+    participant P as Postgres
+
+    B->>S: Initialize Supabase client (URL, anonKey)
+    S->>A: signInAnonymously() or signInWithProvider()
+    A-->>S: Return Session (user.id, session.accessToken)
+    B->>S: Request API key creation
+    S->>S: Initialize KeyHippo instance
+    S->>K: createApiKey(userId, keyDescription)
+    K->>K: Generate JWT payload
+    K->>K: Sign JWT with project_jwt_secret
+    K->>V: Store signed JWT
+    K->>K: Hash signed JWT with user_api_key_secret to create API key
+    K->>K: Hash API key with project_api_key_secret
+    K->>P: Store API key hash in auth.jwts table
+    K-->>S: Return API key (never stored on server)
+    S-->>B: Return API key to client
+
+```
+
+This design offers several key security benefits:
+
+**Unique Key Generation:**
+- Each invocation of `keyhippo.create_api_key` produces a distinct key, regardless of input consistency. This is achieved through the incorporation of UUIDs, timestamps, and multi-stage cryptographic operations.
+
+**Temporal Uniqueness:**
+- The use of high-precision timestamps in the key generation process ensures that keys created in rapid succession remain unique.
+
+**Cryptographic Irreversibility:**
+- The multi-stage hashing process, involving JWT signing and multiple HMAC operations, renders the key generation process cryptographically irreversible.
+
+**Breach Resilience:**
+- In the event of a database compromise, the stored hashes provide no mechanism to regenerate or deduce the original API keys.
+
+**Separation of Concerns:**
+- The utilization of Supabase Vault for secret management adds an additional layer of security, separating critical components of the key generation process.
+
+This approach ensures that API keys remain secure and unrecoverable, even in scenarios involving potential database exposure or repeated generation attacks.
+
+### Authenticated API Request Flow
+
+This diagram illustrates the sequence of operations that occur when an API request is made using a KeyHippo-generated API key:
+
+```mermaid
+sequenceDiagram
+    title: Authenticated API Request
+    autonumber
+    participant C as API Client
+    participant S as Server
+    participant K as KeyHippo (Postgres)
+    participant V as Supabase Vault
+    participant P as Postgres RLS
+
+    C->>S: API request with API key in header
+    S->>S: Extract API key from Authorization header
+    S->>K: RPC: get_uid_for_key(user_api_key: apiKey)
+    K->>V: Retrieve project_api_key_secret
+    V-->>K: Return project_api_key_secret
+    K->>K: Hash API key with project_api_key_secret
+    K->>P: Look up hashed API key in vault.secrets
+    P-->>K: Return matching secret_uuid if found
+    K->>P: Query auth.jwts for user_id using secret_uuid
+    P-->>K: Return user_id
+    K-->>S: Return user_id
+    alt user_id found
+        S->>S: Supabase client authenticated with user_id
+        S->>P: Execute query (including API key in header and user_id)
+        P->>P: Evaluate RLS policy: (auth.uid() = owner_id) OR (keyhippo.key_uid() = owner_id)
+        P->>K: Call keyhippo.key_uid()
+        K->>K: Extract API key from request.headers
+        K->>V: Retrieve project_api_key_secret
+        V-->>K: Return project_api_key_secret
+        K->>K: Hash API key with project_api_key_secret
+        K->>P: Look up hashed API key in vault.secrets
+        P-->>K: Return matching secret_uuid if found
+        K->>P: Query auth.jwts for user_id using secret_uuid
+        P-->>K: Return user_id
+        K-->>P: Return user_id for RLS evaluation
+        P->>P: Complete RLS policy evaluation
+        P-->>S: Return RLS-filtered query results
+        S-->>C: Return API response with data
+    else user_id not found
+        S-->>C: Return authentication error
+    end
+
+```
+
+Note the seamless integration of KeyHippo's authentication process with Supabase's existing RLS framework. This approach ensures that API key authentication adheres to the same security policies as session-based authentication, maintaining a consistent security model across different authentication methods.
+
 ## Alpha Status
 
 KeyHippo is currently in alpha status. We adhere to semantic versioning, and as such, KeyHippo will remain in alpha (versions < 0.1.0) until we've thoroughly validated its stability and feature completeness in production environments. During this phase, we welcome early adopters to provide feedback and report issues.
@@ -75,7 +177,8 @@ KeyHippo is currently in alpha status. We adhere to semantic versioning, and as 
 ## Origins and Evolution
 
 KeyHippo emerged from a pattern observed across Integrated Reasoning's Supabase projects: the need to reconcile API key authentication with Row Level Security policies. This challenge, also noted in Supabase's GitHub discussions (#4419), highlighted a gap in existing solutions.
-We developed KeyHippo to address this, drawing insights from community discussions and approaches, including work by GitHub user j4w8n. The result is a streamlined, production-ready system for API key management in Supabase applications.
+
+We developed KeyHippo to address this, drawing insights from community discussions and approaches. The result is a streamlined, production-ready system for API key management in Supabase applications.
 
 ## Contribution
 
