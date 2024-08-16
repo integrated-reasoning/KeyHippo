@@ -81,10 +81,8 @@ jobs:
         working-directory: ./client
         run: |
           cat << EOF > setup_commands.sql
-          create extension if not exists pgcrypto;
-          create extension if not exists pgsodium;
           select dbdev.install('keyhippo@keyhippo');
-          create extension "keyhippo@keyhippo" version '0.0.6';
+          create extension "keyhippo@keyhippo" version '0.0.7';
           EOF
 
           PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f setup_commands.sql
