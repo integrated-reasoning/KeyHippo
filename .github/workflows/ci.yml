@@ -82,16 +82,10 @@ jobs:
         run: |
           cat << EOF > setup_commands.sql
           select dbdev.install('keyhippo@keyhippo');
-          create extension "keyhippo@keyhippo" version '0.0.7';
+          create extension "keyhippo@keyhippo" version '0.0.8';
           EOF
 
           PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f setup_commands.sql
-
-      - name: Stop Supabase
-        if: always()
-        working-directory: ./client
-        run: |
-          supabase stop
 
   build:
     if: false
