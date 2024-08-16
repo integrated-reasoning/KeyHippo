@@ -34,6 +34,8 @@ jobs:
         run: |
           supabase start
           eval $(supabase status -o env)
+          echo "SUPABASE_URL=$API_URL" >> $GITHUB_ENV
+          echo "SUPABASE_ANON_KEY=$ANON_KEY" >> $GITHUB_ENV
 
       - name: Install dbdev
         working-directory: ./client
@@ -86,6 +88,17 @@ jobs:
           EOF
 
           PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f setup_commands.sql
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Install dependencies
+        working-directory: ./client
+        run: nix develop --command make install
+      - name: Build project
+        working-directory: ./client
+        run: nix develop --command make build
+      - name: Run tests
+        working-directory: ./client
+        run: nix develop --command make test
 
   build:
     if: false
