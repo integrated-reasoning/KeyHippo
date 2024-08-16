@@ -2,6 +2,8 @@
 
 KeyHippo extends Supabase's Row Level Security (RLS) framework, enabling seamless integration of API key authentication within existing security policies.
 
+[![codecov](https://codecov.io/gh/integrated-reasoning/KeyHippo/branch/main/graph/badge.svg?token=4HL1AZKYEZ)](https://codecov.io/gh/integrated-reasoning/KeyHippo)
+
 ## Core Functionality
 
 KeyHippo addresses the challenge of incorporating API key authentication in Supabase applications without compromising the integrity of Row Level Security. It achieves this by extending the RLS framework to encompass both session-based and API key authentication methods within a unified security context. This approach eliminates the need for parallel security structures and maintains granular access control across authentication types.
