@@ -75,28 +75,34 @@ KeyHippo ensures that API keys are never stored in any form and cannot be recons
 
 ```mermaid
 sequenceDiagram
-    title: API Key Creation
+    title: API Key Creation Process
     autonumber
     participant B as Browser
     participant S as Server
     participant A as Auth Service
-    participant V as Supabase Vault
     participant K as KeyHippo (Postgres)
-    participant P as Postgres
+    participant V as Supabase Vault
 
-    B->>S: Initialize Supabase client (URL, anonKey)
+    B->>S: Initial request (e.g., page load)
+    S->>S: Initialize Supabase client (URL, anonKey)
     S->>A: signInAnonymously() or signInWithProvider()
     A-->>S: Return Session (user.id, session.accessToken)
     B->>S: Request API key creation
     S->>S: Initialize KeyHippo instance
     S->>K: createApiKey(userId, keyDescription)
-    K->>K: Generate JWT payload
+    K->>K: Verify auth.uid() matches userId
+    K->>K: Generate UUID (jti) using gen_random_uuid()
+    K->>K: Generate current timestamp and expiry (100 years from now)
+    K->>K: Construct JWT body (role, aud, iss, sub, iat, exp, jti)
+    K->>V: Retrieve user_api_key_secret for userId
+    K->>V: Retrieve project_api_key_secret
+    K->>V: Retrieve project_jwt_secret
     K->>K: Sign JWT with project_jwt_secret
-    K->>V: Store signed JWT
-    K->>K: Hash signed JWT with user_api_key_secret to create API key
-    K->>K: Hash API key with project_api_key_secret
-    K->>P: Store API key hash in auth.jwts table
-    K-->>S: Return API key (never stored on server)
+    K->>K: Generate api_key = HMAC(jwt, user_api_key_secret, sha512)
+    K->>K: Generate project_hash = HMAC(api_key, project_api_key_secret, sha512)
+    K->>V: Store in vault.secrets: (secret: jwt, name: project_hash, description: keyDescription)
+    K->>V: Store in auth.jwts: (secret_id: UUID of stored secret, user_id: userId)
+    K-->>S: Return api_key (derived, not stored)
     S-->>B: Return API key to client
 
 ```
@@ -131,8 +137,8 @@ sequenceDiagram
     participant C as API Client
     participant S as Server
     participant K as KeyHippo (Postgres)
-    participant V as Supabase Vault
     participant P as Postgres RLS
+    participant V as Supabase Vault
 
     C->>S: API request with API key in header
     S->>S: Extract API key from Authorization header
