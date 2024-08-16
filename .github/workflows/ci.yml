@@ -90,6 +90,7 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f setup_commands.sql
 
       - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
       - uses: actions/cache@main
         with:
           path: |
