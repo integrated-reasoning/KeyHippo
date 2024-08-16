@@ -107,6 +107,13 @@ jobs:
       - name: Run tests
         working-directory: ./client
         run: nix develop --command make test
+      - name: Upload coverage report to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          directory: client/coverage
+          fail_ci_if_error: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   build:
     if: false
@@ -152,27 +159,3 @@ jobs:
         run: nix develop --command make install
       - name: Check formatting
         run: nix develop --command pnpm prettier --check .
-
-  coverage:
-    if: false
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: actions/cache@v3
-        with:
-          path: |
-            ~/.npm
-            ~/.pnpm-store
-            node_modules
-          key: ${{ runner.os }}-node-coverage-${{ hashFiles('**/pnpm-lock.yaml') }}
-      - name: Install dependencies
-        run: nix develop --command make install
-      - name: Generate code coverage
-        run: nix develop --command pnpm run test --coverage
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/lcov.info
-          fail_ci_if_error: true
