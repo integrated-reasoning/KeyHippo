@@ -90,6 +90,13 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f setup_commands.sql
 
       - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/cache@main
+        with:
+          path: |
+            ~/.npm
+            ~/.pnpm-store
+            ./client/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/pnpm-lock.yaml') }}
       - name: Install dependencies
         working-directory: ./client
         run: nix develop --command make install
