@@ -19,6 +19,7 @@ KeyHippo extends Supabase's Row Level Security (RLS) framework, enabling seamles
 KeyHippo addresses the challenge of incorporating API key authentication in Supabase applications without compromising the integrity of Row Level Security. It achieves this by extending the RLS framework to encompass both session-based and API key authentication methods within a unified security context. This approach eliminates the need for parallel security structures and maintains granular access control across authentication types.
 
 Top features:
+
 - Unified RLS policies supporting dual authentication methods
 - SQL-based API key issuance
 - Preservation of existing Supabase RLS implementations
@@ -52,10 +53,10 @@ npm install keyhippo
 ### API Key Generation
 
 ```typescript
-import { KeyHippo } from 'keyhippo';
+import { KeyHippo } from "keyhippo";
 
 const keyHippo = new KeyHippo(supabaseClient);
-const result = await keyHippo.createApiKey(userId, 'Primary API Key');
+const result = await keyHippo.createApiKey(userId, "Primary API Key");
 ```
 
 ### RLS Policy Implementation
@@ -83,7 +84,7 @@ This policy grants access when the user is authenticated via a session token (`a
 
 ### API Key Creation Process
 
-KeyHippo ensures that API keys are never stored in any form and cannot be reconstructed, even with access to the database. 
+KeyHippo ensures that API keys are never stored in any form and cannot be reconstructed, even with access to the database.
 
 ```mermaid
 sequenceDiagram
@@ -122,18 +123,23 @@ sequenceDiagram
 This design offers several key security benefits:
 
 **Unique Key Generation:**
+
 - Each invocation of `keyhippo.create_api_key` produces a distinct key, regardless of input consistency. This is achieved through the incorporation of UUIDs, timestamps, and multi-stage cryptographic operations.
 
 **Temporal Uniqueness:**
+
 - The use of high-precision timestamps in the key generation process ensures that keys created in rapid succession remain unique.
 
 **Cryptographic Irreversibility:**
+
 - The multi-stage hashing process, involving JWT signing and multiple HMAC operations, renders the key generation process cryptographically irreversible.
 
 **Breach Resilience:**
+
 - In the event of a database compromise, the stored hashes provide no mechanism to regenerate or deduce the original API keys.
 
 **Separation of Concerns:**
+
 - The utilization of Supabase Vault for secret management adds an additional layer of security, separating critical components of the key generation process.
 
 This approach ensures that API keys remain secure and unrecoverable, even in scenarios involving potential database exposure or repeated generation attacks.
