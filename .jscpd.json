@@ -1,0 +1,14 @@
+{
+  "maxLines": 0,
+  "maxSize": 0,
+  "threshold": 0,
+  "reporters": ["consoleFull", "console"],
+  "ignore": [
+    ".git",
+    "**/extension/**",
+    "**/node_modules/**"
+  ],
+  "gitignore": true,
+  "blame": true,
+  "ignoreCase": true
+}
