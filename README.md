@@ -8,6 +8,7 @@ KeyHippo extends Supabase's Row Level Security (RLS) framework, enabling seamles
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/integrated-reasoning/KeyHippo/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE-MIT)
 [![codecov](https://codecov.io/gh/integrated-reasoning/KeyHippo/branch/main/graph/badge.svg?token=4HL1AZKYEZ)](https://codecov.io/gh/integrated-reasoning/KeyHippo)
+[![Super-Linter](https://github.com/integrated-reasoning/KeyHippo/actions/workflows/lint.yml/badge.svg)](https://github.com/marketplace/actions/super-linter)
 ![NPM Downloads](https://img.shields.io/npm/dw/keyhippo)
 
 [![NPM](https://nodei.co/npm/keyhippo.png)](https://nodei.co/npm/keyhippo/)
