@@ -12,6 +12,13 @@ on:
 env:
   NODE_ENV: development
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  checks: write
+  statuses: write
+
 jobs:
   integration-tests:
     runs-on: ubuntu-latest
@@ -33,9 +40,9 @@ jobs:
         working-directory: ./client
         run: |
           supabase start
-          eval $(supabase status -o env)
-          echo "SUPABASE_URL=$API_URL" >> $GITHUB_ENV
-          echo "SUPABASE_ANON_KEY=$ANON_KEY" >> $GITHUB_ENV
+          eval "$(supabase status -o env)"
+          echo "SUPABASE_URL=${API_URL}" >> "$GITHUB_ENV"
+          echo "SUPABASE_ANON_KEY=${ANON_KEY}" >> "$GITHUB_ENV"
 
       - name: Install dbdev
         working-directory: ./client
@@ -61,7 +68,7 @@ jobs:
                   || '&order=version.desc'
                   || '&limit=1',
                   array[
-                      ('apiKey', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhtdXB0cHBsZnZpaWZyYndtbXR2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE2ODAxMDczNzIsImV4cCI6MTk5NTY4MzM3Mn0.z2CN0mvO2No8wSi46Gw59DFGCTJrzM0AQKsu_5k134s')::http_header
+                      ('apiKey', '${{ secrets.DBDEV_ANON_API_KEY }}')::http_header
                   ],
                   null,
                   null

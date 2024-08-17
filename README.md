@@ -16,7 +16,9 @@ KeyHippo extends Supabase's Row Level Security (RLS) framework, enabling seamles
 
 ## Core Functionality
 
-KeyHippo addresses the challenge of incorporating API key authentication in Supabase applications without compromising the integrity of Row Level Security. It achieves this by extending the RLS framework to encompass both session-based and API key authentication methods within a unified security context. This approach eliminates the need for parallel security structures and maintains granular access control across authentication types.
+KeyHippo addresses the challenge of incorporating API key authentication in Supabase applications without compromising the integrity of Row Level Security. It achieves this by extending the RLS
+framework to encompass both session-based and API key authentication methods within a unified security context. This approach eliminates the need for parallel security structures and maintains
+granular access control across authentication types.
 
 Top features:
 
@@ -192,15 +194,18 @@ sequenceDiagram
 
 ```
 
-Note the seamless integration of KeyHippo's authentication process with Supabase's existing RLS framework. This approach ensures that API key authentication adheres to the same security policies as session-based authentication, maintaining a consistent security model across different authentication methods.
+Note the seamless integration of KeyHippo's authentication process with Supabase's existing RLS framework. This approach ensures that API key authentication adheres to the same security policies as
+session-based authentication, maintaining a consistent security model across different authentication methods.
 
 ## Alpha Status
 
-KeyHippo is currently in alpha status. We adhere to semantic versioning, and as such, KeyHippo will remain in alpha (versions < 0.1.0) until we've thoroughly validated its stability and feature completeness in production environments. During this phase, we welcome early adopters to provide feedback and report issues.
+KeyHippo is currently in alpha status. We adhere to semantic versioning, and as such, KeyHippo will remain in alpha (versions < 0.1.0) until we've thoroughly validated its stability and feature
+completeness in production environments. During this phase, we welcome early adopters to provide feedback and report issues.
 
 ## Origins and Evolution
 
-KeyHippo emerged from a pattern observed across Integrated Reasoning's Supabase projects: the need to reconcile API key authentication with Row Level Security policies. This challenge, also noted in Supabase's GitHub discussions (#4419), highlighted a gap in existing solutions.
+KeyHippo emerged from a pattern observed across Integrated Reasoning's Supabase projects: the need to reconcile API key authentication with Row Level Security policies. This challenge, also noted in
+Supabase's GitHub discussions (#4419), highlighted a gap in existing solutions.
 
 We developed KeyHippo to address this, drawing insights from community discussions and approaches. The result is a streamlined, production-ready system for API key management in Supabase applications.
 

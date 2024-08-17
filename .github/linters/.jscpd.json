@@ -3,7 +3,7 @@
   "maxSize": 0,
   "threshold": 0,
   "reporters": ["consoleFull", "console"],
-  "ignore": [".git", "**/extension/**", "**/node_modules/**"],
+  "ignore": [".git", "**/extension/**/*.sql", "**/node_modules/**"],
   "gitignore": true,
   "blame": true,
   "ignoreCase": true
