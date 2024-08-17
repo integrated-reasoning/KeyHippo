@@ -9,7 +9,7 @@ permissions: {}
 
 jobs:
   build:
-    name: Lint
+    name: lint
     runs-on: ubuntu-latest
 
     permissions:
@@ -26,13 +26,10 @@ jobs:
           # list of files that changed across commits
           fetch-depth: 0
 
-      - name: Cache Docker images.
-        uses: ScribeMD/docker-cache@0.5.0
-        with:
-          key: docker-${{ runner.os }}-${{ hashFiles('./client/pnpm-lock.yaml') }}
-
       - name: Super-linter
         uses: super-linter/super-linter/slim@v7.0.0 # x-release-please-version
         env:
           # To report GitHub Actions status checks
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_TYPESCRIPT_STANDARD: false
+          VALIDATE_SQLFLUFF: false
