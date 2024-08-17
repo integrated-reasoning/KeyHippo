@@ -1,5 +1,4 @@
 name: Publish
-
 permissions: {}
 
 on:
@@ -8,7 +7,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish:
+  publish-npm:
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -27,6 +27,55 @@ jobs:
           NPM_CONFIG_PROVENANCE: true
       - name: Publish to npmjs
         working-directory: ./client
-        run: nix develop --command pnpm publish --no-git-checks -access=public
+        run: nix develop --command pnpm publish --no-git-checks --access=public
         env:
           NPM_CONFIG_PROVENANCE: true
+
+  publish-dbdev:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Build dbdev
+        run: nix build github:integrated-reasoning/nixpkgs/dbdev#dbdev
+      - name: Create dbdev login script
+        run: |
+          cat << 'EOF' > dbdev_login.sh
+          #!/usr/bin/env bash
+          set -e
+
+          if [ -z "${1}" ]; then
+              echo "Error: Token not provided"
+              exit 1
+          fi
+
+          expect << EOD
+          set timeout 30
+          spawn nix run github:integrated-reasoning/nixpkgs/dbdev#dbdev login
+          expect {
+              "Please paste the token" {
+                  send "${1}\r"
+                  exp_continue
+              }
+              timeout {
+                  puts "Timed out waiting for token prompt"
+                  exit 1
+              }
+              eof
+          }
+          EOD
+
+          if [ $? -eq 0 ]; then
+              echo "Successfully logged in to database.dev"
+          else
+              echo "Failed to log in to database.dev"
+              exit 1
+          fi
+          EOF
+          chmod +x dbdev_login.sh
+      - name: Login to database.dev
+        env:
+          DBDEV_TOKEN: ${{ secrets.DBDEV_TOKEN }}
+        run: ./dbdev_login.sh "$DBDEV_TOKEN"
+      - name: Publish to database.dev
+        run: nix run github:integrated-reasoning/nixpkgs/dbdev#dbdev publish
