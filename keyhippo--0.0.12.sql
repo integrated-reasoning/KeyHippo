@@ -288,6 +288,7 @@ END;
         STRICT
         SECURITY DEFINER
         SET search_path = extensions,
+        vault,
         keyhippo,
         keyhippo_internal,
         pg_temp AS $$
@@ -319,7 +320,9 @@ END;
         RETURNS uuid
         LANGUAGE plpgsql
         SECURITY DEFINER
-        SET search_path = keyhippo,
+        SET search_path = extensions,
+        vault,
+        keyhippo,
         keyhippo_internal,
         pg_temp AS $$
 DECLARE
