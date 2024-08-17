@@ -4,7 +4,7 @@
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
     "skipLibCheck": true,
-    "strict": true, // @effect/schema
+    "strict": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
