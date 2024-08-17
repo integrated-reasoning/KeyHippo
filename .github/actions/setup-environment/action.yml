@@ -1,0 +1,20 @@
+name: "Setup Environment"
+
+description: "Installs dependencies using nix and magic cache"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: DeterminateSystems/nix-installer-action@main
+    - uses: DeterminateSystems/magic-nix-cache-action@main
+    - uses: actions/cache@main
+      with:
+        path: |
+          ~/.npm
+          ~/.pnpm-store
+          ./client/node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('**/pnpm-lock.yaml') }}
+    - name: Install dependencies
+      working-directory: ./client
+      shell: bash
+      run: nix develop --command make install
