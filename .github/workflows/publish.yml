@@ -1,0 +1,24 @@
+name: Publish
+
+permissions: {}
+
+on:
+  release:
+    types: [created]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-environment
+      - name: Clean install dependencies
+        working-directory: ./client
+        run: nix develop --command npm ci
+      - name: Publish to npmjs
+        working-directory: ./client
+        run: nix develop --command npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
