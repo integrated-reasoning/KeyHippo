@@ -108,7 +108,7 @@ jobs:
         run: |
           cat << EOF > setup_commands.sql
           select dbdev.install('keyhippo@keyhippo');
-          create extension "keyhippo@keyhippo" version '0.0.12';
+          create extension "keyhippo@keyhippo" version '0.0.13';
           EOF
 
           PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f setup_commands.sql
