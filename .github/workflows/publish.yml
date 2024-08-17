@@ -1,0 +1,32 @@
+name: Publish
+
+permissions: {}
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Install dependencies
+        working-directory: ./client
+        run: nix develop --command pnpm install
+      - name: Setup publishing config
+        working-directory: ./client
+        run: nix develop --command pnpm config set '//registry.npmjs.org/:_authToken' "${NODE_AUTH_TOKEN}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
+      - name: Publish to npmjs
+        working-directory: ./client
+        run: nix develop --command pnpm publish --no-git-checks -access=public
+        env:
+          NPM_CONFIG_PROVENANCE: true
