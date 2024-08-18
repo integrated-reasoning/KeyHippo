@@ -40,7 +40,10 @@ jobs:
       - name: Get version
         id: get_version
         working-directory: ./extension
-        run: echo "version=$(grep -oP "(?<=default_version = ').*(?=')" keyhippo.control)" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(grep "default_version" keyhippo.control | sed "s/default_version[[:space:]]*=[[:space:]]*'//;s/'$//")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Parsed version: $version"
       - name: Build dbdev
         run: nix build github:integrated-reasoning/nixpkgs/dbdev#dbdev
       - name: Create dbdev login script
