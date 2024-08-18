@@ -32,9 +32,15 @@ jobs:
 
   publish-dbdev:
     runs-on: macos-latest
+    outputs:
+      dbdev_version: ${{ steps.get_version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
+      - name: Get version
+        id: get_version
+        working-directory: ./extension
+        run: echo "version=$(grep -oP "(?<=default_version = ').*(?=')" keyhippo.control)" >> "$GITHUB_OUTPUT"
       - name: Build dbdev
         run: nix build github:integrated-reasoning/nixpkgs/dbdev#dbdev
       - name: Create dbdev login script
@@ -79,3 +85,84 @@ jobs:
       - name: Publish to database.dev
         working-directory: ./extension
         run: nix run github:integrated-reasoning/nixpkgs/dbdev#dbdev publish
+
+  post-dbdev-publish-tests:
+    needs: publish-dbdev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Docker images
+        uses: ScribeMD/docker-cache@0.5.0
+        with:
+          key: docker-${{ runner.os }}-${{ hashFiles('./client/pnpm-lock.yaml') }}
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase
+        working-directory: ./client
+        run: |
+          supabase start
+          eval "$(supabase status -o env)"
+          echo "SUPABASE_URL=${API_URL}" >> "$GITHUB_ENV"
+          echo "SUPABASE_ANON_KEY=${ANON_KEY}" >> "$GITHUB_ENV"
+
+      - name: Install dbdev and KeyHippo from dbdev
+        working-directory: ./client
+        run: |
+          cat << EOF > setup_commands.sql
+          create extension if not exists http with schema extensions;
+          create extension if not exists pg_tle;
+          drop extension if exists "supabase-dbdev";
+          select pgtle.uninstall_extension_if_exists('supabase-dbdev');
+          select
+              pgtle.install_extension(
+                  'supabase-dbdev',
+                  resp.contents ->> 'version',
+                  'PostgreSQL package manager',
+                  resp.contents ->> 'sql'
+              )
+          from http(
+              (
+                  'GET',
+                  'https://api.database.dev/rest/v1/'
+                  || 'package_versions?select=sql,version'
+                  || '&package_name=eq.supabase-dbdev'
+                  || '&order=version.desc'
+                  || '&limit=1',
+                  array[
+                      ('apiKey', '${{ secrets.DBDEV_ANON_API_KEY }}')::http_header
+                  ],
+                  null,
+                  null
+              )
+          ) x,
+          lateral (
+              select
+                  ((row_to_json(x) -> 'content') #>> '{}')::json -> 0
+          ) resp(contents);
+          create extension "supabase-dbdev";
+          select dbdev.install('supabase-dbdev');
+          drop extension if exists "supabase-dbdev";
+          create extension "supabase-dbdev";
+          select dbdev.install('keyhippo@keyhippo');
+          create extension "keyhippo@keyhippo" version '${{ needs.publish-dbdev.outputs.dbdev_version }}';
+          EOF
+
+          PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f setup_commands.sql
+
+      - uses: ./.github/actions/setup-environment
+      - name: Install dependencies
+        working-directory: ./client
+        run: |
+          nix develop --command pnpm install
+      - name: Build project
+        working-directory: ./client
+        run: nix develop --command pnpm run build
+      - name: Run tests
+        working-directory: ./client
+        run: nix develop --command pnpm test
