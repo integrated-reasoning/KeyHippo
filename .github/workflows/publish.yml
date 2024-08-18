@@ -77,4 +77,5 @@ jobs:
           DBDEV_TOKEN: ${{ secrets.DBDEV_TOKEN }}
         run: ./dbdev_login.sh "$DBDEV_TOKEN"
       - name: Publish to database.dev
+        working-directory: ./extension
         run: nix run github:integrated-reasoning/nixpkgs/dbdev#dbdev publish
