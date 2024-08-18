@@ -1,6 +1,6 @@
 {
   "name": "keyhippo",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "Issue API keys for your Supabase app with one line of SQL",
   "main": "dist/index.ts",
   "types": "dist/index.d.ts",
