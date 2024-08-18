@@ -17,9 +17,8 @@ KeyHippo extends Supabase's Row Level Security (RLS) framework, enabling seamles
 
 ## Core Functionality
 
-KeyHippo addresses the challenge of incorporating API key authentication in Supabase applications without compromising the integrity of Row Level Security. It achieves this by extending the RLS
-framework to encompass both session-based and API key authentication methods within a unified security context. This approach eliminates the need for parallel security structures and maintains
-granular access control across authentication types.
+KeyHippo addresses the challenge of incorporating API key authentication in Supabase applications without compromising the integrity of Row Level Security. It achieves this by extending the RLS framework to encompass both session-based and API key authentication methods within a unified security
+context. This approach eliminates the need for parallel security structures and maintains granular access control across authentication types.
 
 Top features:
 
@@ -28,7 +27,7 @@ Top features:
 - Preservation of existing Supabase RLS implementations
 - Essential API key lifecycle management
 
-## Implementation
+## Quick Start
 
 ### Database Setup
 
@@ -43,6 +42,8 @@ Top features:
 
 2. Post-installation, KeyHippo functions become accessible within your database environment.
 
+For more detailed information on the PostgreSQL extension, see the [extension readme](/extension/README.md).
+
 ### Application Integration
 
 Install via npm:
@@ -51,7 +52,9 @@ Install via npm:
 npm install keyhippo
 ```
 
-## Usage Paradigms
+For more information on the npm package, including usage examples, see the [client readme](/client/README.md).
+
+## Usage Examples
 
 ### API Key Generation
 
@@ -83,7 +86,9 @@ This policy grants access when the user is authenticated via a session token (`a
 - `loadApiKeyInfo`: Retrieve metadata for existing keys
 - `getAllKeyMetadata`: Comprehensive metadata for a user's API keys
 
-## Process Diagrams
+For more detailed usage instructions and API reference, please see the [documentation](/docs/README.md).
+
+## Architecture
 
 ### API Key Creation Process
 
@@ -120,32 +125,15 @@ sequenceDiagram
     K->>V: Store in auth.jwts: (secret_id: UUID of stored secret, user_id: userId)
     K-->>S: Return api_key (derived, not stored)
     S-->>B: Return API key to client
-
 ```
 
 This design offers several key security benefits:
 
-**Unique Key Generation:**
-
-- Each invocation of `keyhippo.create_api_key` produces a distinct key, regardless of input consistency. This is achieved through the incorporation of UUIDs, timestamps, and multi-stage cryptographic operations.
-
-**Temporal Uniqueness:**
-
-- The use of high-precision timestamps in the key generation process ensures that keys created in rapid succession remain unique.
-
-**Cryptographic Irreversibility:**
-
-- The multi-stage hashing process, involving JWT signing and multiple HMAC operations, renders the key generation process cryptographically irreversible.
-
-**Breach Resilience:**
-
-- In the event of a database compromise, the stored hashes provide no mechanism to regenerate or deduce the original API keys.
-
-**Separation of Concerns:**
-
-- The utilization of Supabase Vault for secret management adds an additional layer of security, separating critical components of the key generation process.
-
-This approach ensures that API keys remain secure and unrecoverable, even in scenarios involving potential database exposure or repeated generation attacks.
+- **Unique Key Generation:** Each invocation of `keyhippo.create_api_key` produces a distinct key, regardless of input consistency.
+- **Temporal Uniqueness:** The use of high-precision timestamps ensures that keys created in rapid succession remain unique.
+- **Cryptographic Irreversibility:** The multi-stage hashing process renders the key generation process cryptographically irreversible.
+- **Breach Resilience:** In the event of a database compromise, the stored hashes provide no mechanism to regenerate or deduce the original API keys.
+- **Separation of Concerns:** The utilization of Supabase Vault for secret management adds an additional layer of security.
 
 ### Authenticated API Request Flow
 
@@ -192,34 +180,42 @@ sequenceDiagram
     else user_id not found
         S-->>C: Return authentication error
     end
-
 ```
 
-Note the seamless integration of KeyHippo's authentication process with Supabase's existing RLS framework. This approach ensures that API key authentication adheres to the same security policies as
-session-based authentication, maintaining a consistent security model across different authentication methods.
+Note the seamless integration of KeyHippo's authentication process with Supabase's existing RLS framework. This approach ensures that API key authentication adheres to the same security policies as session-based authentication, maintaining a consistent security model across different authentication methods.
+
+For more detailed architectural information, please see the [Architecture documentation](/docs/Architecture.md).
 
 ## Alpha Status
 
-KeyHippo is currently in alpha status. We adhere to semantic versioning, and as such, KeyHippo will remain in alpha (versions < 0.1.0) until we've thoroughly validated its stability and feature
-completeness in production environments. During this phase, we welcome early adopters to provide feedback and report issues.
+KeyHippo is currently in alpha status. We adhere to semantic versioning, and as such, KeyHippo will remain in alpha (versions < 0.1.0) until we've thoroughly validated its stability and feature completeness in production environments. During this phase, we welcome early adopters to provide feedback and report issues.
 
 ## Origins and Evolution
 
-KeyHippo emerged from a pattern observed across Integrated Reasoning's Supabase projects: the need to reconcile API key authentication with Row Level Security policies. This challenge, also noted in
-Supabase's GitHub discussions (#4419), highlighted a gap in existing solutions.
+KeyHippo emerged from a pattern observed across Integrated Reasoning's Supabase projects: the need to reconcile API key authentication with Row Level Security policies. This challenge, also noted in Supabase's GitHub discussions (#4419), highlighted a gap in existing solutions.
 
 We developed KeyHippo to address this, drawing insights from community discussions and approaches. The result is a streamlined, production-ready system for API key management in Supabase applications.
 
 ## Contribution
 
-KeyHippo welcomes community contributions. For guidance on contributing, please refer to our [Contributing Guide](CONTRIBUTING.md).
+KeyHippo welcomes community contributions. For guidance on contributing, please refer to our [Contributing Guide](/docs/Contributing.md).
 
 ## Licensing
 
-KeyHippo is distributed under the MIT license.
+KeyHippo is distributed under the MIT license. See the [LICENSE](LICENSE) file for details.
 
 ## Support Channels
 
 For technical issues, feature requests, or general inquiries, please open an issue on our [GitHub repository](https://github.com/integrated-reasoning/KeyHippo/issues).
 
 For commercial support options, consult [keyhippo.com](https://keyhippo.com).
+
+## Additional Documentation
+
+- [Installation Guide](/docs/Installation.md)
+- [Usage Guide](/docs/Usage.md)
+- [API Reference](/docs/API-Reference.md)
+- [Security Considerations](/docs/Security.md)
+- [Changelog](/docs/Changelog.md)
+- [Advanced RLS Integration](/docs/advanced/RLS-Integration.md)
+- [Performance Optimization](/docs/advanced/Performance-Optimization.md)
