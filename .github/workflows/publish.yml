@@ -92,25 +92,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Cache Docker images
-        uses: ScribeMD/docker-cache@0.5.0
-        with:
-          key: docker-${{ runner.os }}-${{ hashFiles('./client/pnpm-lock.yaml') }}
-
-      - name: Setup Supabase CLI
-        uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
-      - name: Start Supabase
-        working-directory: ./client
-        run: |
-          supabase start
-          eval "$(supabase status -o env)"
-          echo "SUPABASE_URL=${API_URL}" >> "$GITHUB_ENV"
-          echo "SUPABASE_ANON_KEY=${ANON_KEY}" >> "$GITHUB_ENV"
-
+      - uses: ./.github/actions/setup-integration-tests
       - name: Install dbdev and KeyHippo from dbdev
         working-directory: ./client
         run: |

@@ -1,0 +1,25 @@
+name: "Setup Integration Tests"
+
+description: "Caches Docker images, sets up Supabase CLI, starts Supabase"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Cache Docker images
+      uses: ScribeMD/docker-cache@0.5.0
+      with:
+        key: docker-${{ runner.os }}-${{ hashFiles('./client/pnpm-lock.yaml') }}
+
+    - name: Setup Supabase CLI
+      uses: supabase/setup-cli@v1
+      with:
+        version: latest
+
+    - name: Start Supabase
+      working-directory: ./client
+      shell: bash
+      run: |
+        supabase start
+        eval "$(supabase status -o env)"
+        echo "SUPABASE_URL=${API_URL}" >> "$GITHUB_ENV"
+        echo "SUPABASE_ANON_KEY=${ANON_KEY}" >> "$GITHUB_ENV"
