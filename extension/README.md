@@ -8,10 +8,8 @@ To install the KeyHippo extension in your PostgreSQL database:
 
 ```sql
 select dbdev.install('keyhippo@keyhippo');
-create extension "keyhippo@keyhippo" version '0.0.13';
+create extension "keyhippo@keyhippo" version '0.0.14';
 ```
-
-Replace '0.0.13' with the latest version number if necessary.
 
 ## Usage in RLS Policies
 
@@ -35,10 +33,6 @@ This policy allows access when the user is authenticated via a session token (`a
 - `keyhippo.revoke_api_key(key_id UUID)`: Revokes an existing API key.
 
 For a complete list of functions and their usage, please refer to our [API Reference](/docs/API-Reference.md).
-
-## Version History
-
-This directory contains multiple SQL files representing different versions of the extension. Each file is named according to the version it represents (e.g., `keyhippo--0.0.13.sql`).
 
 ## Contributing
 
