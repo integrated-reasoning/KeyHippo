@@ -18,6 +18,9 @@ jobs:
       - name: Install dependencies
         working-directory: ./client
         run: nix develop --command pnpm install
+      - name: Build package
+        working-directory: ./client
+        run: nix develop --command pnpm run build
       - name: Setup publishing config
         working-directory: ./client
         run: nix develop --command pnpm config set '//registry.npmjs.org/:_authToken' "${NODE_AUTH_TOKEN}"

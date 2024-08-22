@@ -2,10 +2,14 @@
   "name": "keyhippo",
   "version": "0.0.17",
   "description": "Issue API keys for your Supabase app with one line of SQL",
-  "main": "dist/index.ts",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsup src/index.ts --format cjs,esm --dts",
     "test": "vitest run"
   },
   "repository": {
@@ -36,7 +40,8 @@
     "@vitest/coverage-v8": "^1.6.0",
     "prettier": "^3.3.3",
     "typescript": "5.3.3",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.0",
+    "tsup": "^8.0.2"
   },
   "peerDependencies": {
     "@supabase/ssr": "^0.3.0",
