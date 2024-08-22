@@ -99,8 +99,8 @@ export const loadApiKeyInfo = (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   logger: Logger,
-): Effect.Effect<ApiKeyInfo[], AppError> =>
-  pipe(
+): Effect.Effect<ApiKeyInfo[], AppError> => {
+  return pipe(
     Effect.tryPromise({
       try: () =>
         supabase
@@ -111,32 +111,43 @@ export const loadApiKeyInfo = (
         message: `Failed to load API key info: ${String(error)}`,
       }),
     }),
+    Effect.tap((result: any) =>
+      Effect.sync(() => {
+        logger.debug(`Raw result from RPC: ${JSON.stringify(result)}`);
+        logger.debug(
+          `Result status: ${result.status}, statusText: ${result.statusText}`,
+        );
+        logger.debug(`Result error: ${JSON.stringify(result.error)}`);
+        logger.debug(`Result data: ${JSON.stringify(result.data)}`);
+      }),
+    ),
     Effect.flatMap((result: any) => {
       if (result.error) {
+        logger.error(`Database error: ${result.error.message}`);
         return Effect.fail<AppError>({
           _tag: "DatabaseError",
           message: `Error loading API key info: ${result.error.message}`,
         });
       }
+      if (result.data === null) {
+        logger.warn(`No data returned for user: ${userId}`);
+        return Effect.succeed([]);
+      }
       if (!Array.isArray(result.data)) {
+        logger.error(`Invalid data structure: ${JSON.stringify(result.data)}`);
         return Effect.fail<AppError>({
           _tag: "DatabaseError",
-          message: "Invalid data returned when loading API key info",
+          message: `Invalid data returned when loading API key info: ${JSON.stringify(result)}`,
         });
       }
       try {
-        const parsedData = result.data.map((item: unknown) => {
-          if (typeof item !== "string") {
-            throw new Error("Invalid item type in API key info");
-          }
-          const parsed = JSON.parse(item);
-          if (!("id" in parsed) || !("description" in parsed)) {
-            throw new Error("Invalid API key info structure");
-          }
-          return parsed as ApiKeyInfo;
-        });
-        return Effect.succeed(parsedData);
+        const apiKeyInfo = result.data.map((item: any) => ({
+          id: item.id,
+          description: item.description,
+        }));
+        return Effect.succeed(apiKeyInfo);
       } catch (error) {
+        logger.error(`Error parsing API key info: ${String(error)}`);
         return Effect.fail<AppError>({
           _tag: "DatabaseError",
           message: `Failed to parse API key info: ${String(error)}`,
@@ -151,11 +162,12 @@ export const loadApiKeyInfo = (
       ),
     ),
     Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to load API key info: ${error.message}`),
-      ),
+      Effect.sync(() => {
+        logger.error(`Failed to load API key info: ${JSON.stringify(error)}`);
+      }),
     ),
   );
+};
 
 export const revokeApiKey = (
   supabase: SupabaseClient<any, "public", any>,
