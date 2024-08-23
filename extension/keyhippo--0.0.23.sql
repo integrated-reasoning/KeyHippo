@@ -190,11 +190,65 @@ END;
             RAISE LOG '[KeyHippo] KeyHippo vault secrets setup complete';
 END;
     $$;
-    -- Create function to generate and store API key
-    CREATE OR REPLACE FUNCTION keyhippo.create_api_key (id_of_user text, key_description text )
-        RETURNS text
+    -- Create the load_api_key_info function
+    CREATE OR REPLACE FUNCTION keyhippo.load_api_key_info (id_of_user text )
+        RETURNS jsonb
         LANGUAGE plpgsql
-        SECURITY DEFINER AS $$
+        SECURITY DEFINER
+        SET search_path = extensions AS $$
+DECLARE
+    key_info jsonb := '[]'::jsonb;
+    jwt_record RECORD;
+    vault_record RECORD;
+    jwt_count int;
+BEGIN
+    RAISE LOG '[KeyHippo] Starting load_api_key_info for user: %', id_of_user;
+    -- Check if the function is being executed as the correct user
+    IF auth.uid () != id_of_user::uuid THEN
+        RAISE LOG '[KeyHippo] Unauthorized access attempt for user: %. Current auth.uid(): %', id_of_user, auth.uid ();
+        RETURN NULL;
+    END IF;
+    -- Log the number of JWT records found
+    SELECT
+        COUNT(*) INTO jwt_count
+    FROM
+        auth.jwts
+    WHERE
+        user_id = id_of_user::uuid;
+    RAISE LOG '[KeyHippo] Found % JWT records for user: %', jwt_count, id_of_user;
+    FOR jwt_record IN
+    SELECT
+        secret_id
+    FROM
+        auth.jwts
+    WHERE
+        user_id = id_of_user::uuid LOOP
+            RAISE LOG '[KeyHippo] Processing secret_id: %', jwt_record.secret_id;
+            BEGIN
+                SELECT
+                    description INTO STRICT vault_record
+                FROM
+                    vault.decrypted_secrets
+                WHERE
+                    id = jwt_record.secret_id;
+                RAISE LOG '[KeyHippo] Found description: %', vault_record.description;
+                key_info := key_info || jsonb_build_object('id', jwt_record.secret_id, 'description', vault_record.description);
+            EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    RAISE LOG '[KeyHippo] No data found in vault.decrypted_secrets for secret_id: %', jwt_record.secret_id;
+                WHEN OTHERS THEN
+                    RAISE LOG '[KeyHippo] Error processing secret_id %: %', jwt_record.secret_id, SQLERRM;
+            END;
+    END LOOP;
+    RAISE LOG '[KeyHippo] Completed load_api_key_info. Total keys: %', jsonb_array_length(key_info);
+    RETURN key_info;
+END $$;
+
+-- Create function to generate and store API key
+CREATE OR REPLACE FUNCTION keyhippo.create_api_key (id_of_user text, key_description text)
+    RETURNS text
+    LANGUAGE plpgsql
+    SECURITY DEFINER AS $$
 DECLARE
     api_key text;
     expires bigint;
@@ -600,40 +654,6 @@ BEGIN
 END;
     $$;
     RAISE LOG '[KeyHippo] Function "get_api_key" created.';
-    CREATE OR REPLACE FUNCTION keyhippo.load_api_key_info (id_of_user text )
-        RETURNS text[]
-        LANGUAGE plpgsql
-        SECURITY DEFINER
-        SET search_path = extensions AS $$
-DECLARE
-    current_set jsonb;
-    jwt_record RECORD;
-    key_info jsonb[];
-    vault_record RECORD;
-BEGIN
-    IF auth.uid () = id_of_user::uuid THEN
-        FOR jwt_record IN
-        SELECT
-            secret_id
-        FROM
-            auth.jwts
-        WHERE
-            user_id = id_of_user::uuid LOOP
-                SELECT
-                    description INTO vault_record
-                FROM
-                    vault.decrypted_secrets
-                WHERE
-                    id = jwt_record.secret_id;
-                current_set := jsonb_build_object('description', TO_JSONB (vault_record.description), 'id', TO_JSONB (jwt_record.secret_id));
-                SELECT
-                    INTO key_info array_append(key_info, current_set);
-            END LOOP;
-    END IF;
-    RETURN key_info;
-END;
-    $$;
-    RAISE LOG '[KeyHippo] Function "load_api_key_info" created.';
     -- Grant necessary permissions
     GRANT USAGE ON SCHEMA keyhippo TO authenticated;
     GRANT USAGE ON SCHEMA keyhippo TO anon;
