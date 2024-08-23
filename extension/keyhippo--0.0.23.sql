@@ -655,16 +655,23 @@ END;
     $$;
     RAISE LOG '[KeyHippo] Function "get_api_key" created.';
     -- Grant necessary permissions
-    GRANT USAGE ON SCHEMA keyhippo TO authenticated;
-    GRANT USAGE ON SCHEMA keyhippo TO anon;
     GRANT ALL ON FUNCTION keyhippo.create_api_key (TEXT, TEXT) TO authenticated;
-    GRANT ALL ON FUNCTION keyhippo.revoke_api_key (TEXT, TEXT) TO authenticated;
-    GRANT ALL ON FUNCTION keyhippo.get_api_key_metadata (UUID) TO authenticated;
     GRANT ALL ON FUNCTION keyhippo.get_api_key (TEXT, TEXT) TO authenticated;
-    GRANT ALL ON FUNCTION keyhippo.load_api_key_info (TEXT) TO authenticated;
-    GRANT ALL ON FUNCTION keyhippo.get_uid_for_key (TEXT) TO authenticated;
-    GRANT ALL ON FUNCTION keyhippo.get_uid_for_key (TEXT) TO anon;
+    GRANT ALL ON FUNCTION keyhippo.get_api_key_metadata (UUID) TO authenticated;
+    GRANT ALL ON FUNCTION keyhippo.get_uid_for_key (TEXT) TO authenticated, service_role, anon;
+    GRANT ALL ON FUNCTION keyhippo.load_api_key_info (TEXT) TO authenticated, service_role, anon;
+    GRANT ALL ON FUNCTION keyhippo.revoke_api_key (TEXT, TEXT) TO authenticated;
     GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo TO authenticated;
+    GRANT SELECT ON auth.jwts TO authenticated;
+    GRANT SELECT ON auth.jwts TO service_role;
+    GRANT SELECT ON vault.decrypted_secrets TO authenticated;
+    GRANT SELECT ON vault.decrypted_secrets TO service_role;
+    GRANT USAGE ON SCHEMA auth TO authenticated;
+    GRANT USAGE ON SCHEMA auth TO service_role;
+    GRANT USAGE ON SCHEMA keyhippo TO anon;
+    GRANT USAGE ON SCHEMA keyhippo TO authenticated, service_role, anon;
+    GRANT USAGE ON SCHEMA vault TO authenticated;
+    GRANT USAGE ON SCHEMA vault TO service_role;
     -- Set up vault secrets
     PERFORM
         keyhippo.setup_vault_secrets ();
