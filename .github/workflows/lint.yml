@@ -33,3 +33,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VALIDATE_TYPESCRIPT_STANDARD: false
           VALIDATE_SQLFLUFF: false
+          USE_FIND_ALGORITHM: true
