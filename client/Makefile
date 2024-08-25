@@ -36,3 +36,26 @@ build: install
 .PHONY: test
 test: install
 	pnpm run test --coverage
+
+# Set up Supabase
+.PHONY: setup-supabase
+setup-supabase:
+	@echo "Setting up Supabase..."
+	@pnpx supabase start
+	@eval $$(pnpx supabase status -o env); \
+	echo "SUPABASE_URL=$$API_URL" > .env.test; \
+	echo "SUPABASE_ANON_KEY=$$ANON_KEY" >> .env.test; \
+	echo "CREATE EXTENSION IF NOT EXISTS pgcrypto;" > create_schema.sql; \
+	echo "CREATE EXTENSION IF NOT EXISTS pgjwt;" >> create_schema.sql; \
+	echo "CREATE SCHEMA IF NOT EXISTS keyhippo;" >> create_schema.sql; \
+
+# Run tests locally
+.PHONY: local-test
+test: install setup-supabase
+	@echo "Running tests..."
+	@if [ -f .env.test ]; then \
+		export $$(cat .env.test | xargs) && pnpm run test --coverage; \
+	else \
+		echo "Error: .env.test file not found. Make sure setup-supabase completed successfully."; \
+		exit 1; \
+	fi
