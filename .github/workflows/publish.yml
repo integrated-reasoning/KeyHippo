@@ -143,6 +143,7 @@ jobs:
 
           PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f setup_commands.sql
 
+      - uses: ./.github/actions/apply-integration-test-migrations
       - uses: ./.github/actions/setup-environment
       - name: Install dependencies
         working-directory: ./client
