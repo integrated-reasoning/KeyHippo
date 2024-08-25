@@ -6,25 +6,33 @@ let keyHippo: KeyHippo;
 let userId: string;
 let supabase: SupabaseClient;
 
-beforeAll(async () => {
+const setup = async () => {
   supabase = createClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_ANON_KEY!,
   );
   const { data, error } = await supabase.auth.signInAnonymously();
+  if (error) throw new Error("Error signing in anonymously");
+
   keyHippo = new KeyHippo(supabase, console);
   userId = data.user!.id;
-});
+};
 
-afterAll(async () => {
-  // Clean up: revoke all keys created during tests
-  const keyInfos = await keyHippo.loadApiKeyInfo(userId);
-  for (const keyInfo of keyInfos) {
-    await keyHippo.revokeApiKey(userId, keyInfo.id);
+const teardown = async () => {
+  try {
+    const keyInfos = await keyHippo.loadApiKeyInfo(userId);
+    for (const keyInfo of keyInfos) {
+      await keyHippo.revokeApiKey(userId, keyInfo.id);
+    }
+  } catch (error) {
+    console.error("Cleanup failed", error);
   }
-});
+};
 
-describe("KeyHippo Integration Tests", () => {
+beforeAll(setup);
+afterAll(teardown);
+
+describe("KeyHippo Client Tests", () => {
   it("should create an API key", async () => {
     const keyDescription = "Test Key";
     const result = await keyHippo.createApiKey(userId, keyDescription);
