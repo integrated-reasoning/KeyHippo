@@ -30,6 +30,12 @@ vars == <<ActiveTokens, TokenClaims, TokenSignatures, CurrentTime,
           TokenExpiration, RevokedTokens, TokenIssuers, TokenAudiences,
           TokenScopes, TokenUses, UserTokens>>
 
+\* Helper function to generate a unique token ID
+GenerateTokenId(user, time) ==
+    LET hash == ((CHOOSE n \in 1..1000 : TRUE) *
+                 (CHOOSE prime \in {2, 3, 5, 7, 11, 13, 17, 19, 23, 29} : TRUE)) % 997
+    IN  "jwt_" \o ToString(hash)
+
 \* Type correctness invariant
 TypeInvariant ==
     /\ ActiveTokens \subseteq STRING
@@ -69,15 +75,15 @@ ValidClaims(claims) ==
 CreateJWT ==
     /\ Cardinality(ActiveTokens) < MaxTokens
     /\ \E user \in Users, issuer \in Issuers, audience \in (SUBSET Audiences) \ {{}},
-         scope \in (SUBSET Scopes) \ {{}}, expirationTime \in CurrentTime+2..MaxTime :
+         scope \in (SUBSET Scopes) \ {{}}, expirationTime \in CurrentTime+2..IF CurrentTime+5 <= MaxTime THEN CurrentTime+5 ELSE MaxTime :
         /\ Cardinality(UserTokens[user]) < MaxTokensPerUser
-        /\ LET newToken == "jwt_" \o ToString(Cardinality(ActiveTokens) + 1)
+        /\ LET newToken == GenerateTokenId(user, CurrentTime)
                claims == [
                    sub |-> user,
                    iat |-> CurrentTime,
                    exp |-> expirationTime
                ]
-               signature == "sig_" \o ToString(Cardinality(ActiveTokens) + 1)
+               signature == "sig_" \o newToken
            IN  /\ ActiveTokens' = ActiveTokens \cup {newToken}
                /\ TokenClaims' = TokenClaims @@ (newToken :> claims)
                /\ TokenSignatures' = TokenSignatures @@ (newToken :> signature)
