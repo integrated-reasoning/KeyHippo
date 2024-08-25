@@ -1,41 +1,32 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { KeyHippo } from "../src/index";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { setupTest, TestSetup } from "./testSetup";
 
-let keyHippo: KeyHippo;
-let userId: string;
-let supabase: SupabaseClient;
+let testSetup: TestSetup;
 
-const setup = async () => {
-  supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!,
-  );
-  const { data, error } = await supabase.auth.signInAnonymously();
-  if (error) throw new Error("Error signing in anonymously");
-
-  keyHippo = new KeyHippo(supabase, console);
-  userId = data.user!.id;
-};
+beforeAll(async () => {
+  testSetup = await setupTest();
+});
 
 const teardown = async () => {
   try {
-    const keyInfos = await keyHippo.loadApiKeyInfo(userId);
+    const keyInfos = await testSetup.keyHippo.loadApiKeyInfo(testSetup.userId);
     for (const keyInfo of keyInfos) {
-      await keyHippo.revokeApiKey(userId, keyInfo.id);
+      await testSetup.keyHippo.revokeApiKey(testSetup.userId, keyInfo.id);
     }
   } catch (error) {
     console.error("Cleanup failed", error);
   }
 };
 
-beforeAll(setup);
 afterAll(teardown);
 
 describe("KeyHippo Client Tests", () => {
   it("should create an API key", async () => {
     const keyDescription = "Test Key";
-    const result = await keyHippo.createApiKey(userId, keyDescription);
+    const result = await testSetup.keyHippo.createApiKey(
+      testSetup.userId,
+      keyDescription,
+    );
     expect(result).toHaveProperty("id");
     expect(result).toHaveProperty("description");
     expect(result).toHaveProperty("apiKey");
@@ -44,7 +35,7 @@ describe("KeyHippo Client Tests", () => {
   });
 
   it("should load API key info", async () => {
-    const keyInfos = await keyHippo.loadApiKeyInfo(userId);
+    const keyInfos = await testSetup.keyHippo.loadApiKeyInfo(testSetup.userId);
 
     expect(Array.isArray(keyInfos)).toBe(true);
     expect(keyInfos.length).toBeGreaterThan(0);
@@ -53,7 +44,9 @@ describe("KeyHippo Client Tests", () => {
   });
 
   it("should get all key metadata", async () => {
-    const metadata = await keyHippo.getAllKeyMetadata(userId);
+    const metadata = await testSetup.keyHippo.getAllKeyMetadata(
+      testSetup.userId,
+    );
 
     expect(Array.isArray(metadata)).toBe(true);
     expect(metadata.length).toBeGreaterThan(0);
@@ -70,7 +63,10 @@ describe("KeyHippo Client Tests", () => {
 
   it("should authenticate with an API key", async () => {
     const keyDescription = "Auth Test Key";
-    const createdKey = await keyHippo.createApiKey(userId, keyDescription);
+    const createdKey = await testSetup.keyHippo.createApiKey(
+      testSetup.userId,
+      keyDescription,
+    );
 
     const mockRequest = new Request("https://example.com", {
       headers: {
@@ -78,34 +74,37 @@ describe("KeyHippo Client Tests", () => {
       },
     });
 
-    const authResult = await keyHippo.authenticate(mockRequest);
+    const authResult = await testSetup.keyHippo.authenticate(mockRequest);
 
     expect(authResult).toHaveProperty("userId");
     expect(authResult).toHaveProperty("supabase");
-    expect(authResult.userId).toBe(userId);
+    expect(authResult.userId).toBe(testSetup.userId);
   });
 
   it("should revoke an API key", async () => {
     const keyDescription = "Key to be revoked";
-    const createdKey = await keyHippo.createApiKey(userId, keyDescription);
+    const createdKey = await testSetup.keyHippo.createApiKey(
+      testSetup.userId,
+      keyDescription,
+    );
 
-    await keyHippo.revokeApiKey(userId, createdKey.id);
+    await testSetup.keyHippo.revokeApiKey(testSetup.userId, createdKey.id);
 
-    const keyInfos = await keyHippo.loadApiKeyInfo(userId);
+    const keyInfos = await testSetup.keyHippo.loadApiKeyInfo(testSetup.userId);
     const revokedKey = keyInfos.find((key) => key.id === createdKey.id);
 
     expect(revokedKey).toBeUndefined();
   });
 
   it("should handle errors when creating an invalid API key", async () => {
-    await expect(keyHippo.createApiKey("", "Invalid Key")).rejects.toThrow(
-      "Error creating API key",
-    );
+    await expect(
+      testSetup.keyHippo.createApiKey("", "Invalid Key"),
+    ).rejects.toThrow("Error creating API key");
   });
 
   it("should handle errors when getting metadata for non-existent user", async () => {
     await expect(
-      keyHippo.getAllKeyMetadata("non-existent-user"),
+      testSetup.keyHippo.getAllKeyMetadata("non-existent-user"),
     ).rejects.toThrow("Error getting API key metadata");
   });
 });

@@ -1,11 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { KeyHippo } from "../src/index";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { v4 as uuidv4 } from "uuid";
+import { setupTest, TestSetup } from "./testSetup";
 
-let keyHippo: KeyHippo;
-let userId: string;
-let supabase: SupabaseClient;
+let testSetup: TestSetup;
 let testAccountId: string;
 let apiKey: string;
 
@@ -20,9 +17,8 @@ const fetchData = async (url: string, options: RequestInit = {}) => {
     ...options,
     headers: { ...headers(), ...options.headers },
   });
-  const responseBody = await response.text(); // Fetch the response as text first
+  const responseBody = await response.text();
 
-  // Try parsing the responseBody as JSON if it is not empty
   const data = responseBody ? JSON.parse(responseBody) : null;
 
   if (!response.ok) {
@@ -34,18 +30,13 @@ const fetchData = async (url: string, options: RequestInit = {}) => {
 };
 
 beforeAll(async () => {
-  supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!,
-  );
-  const { data, error } = await supabase.auth.signInAnonymously();
-  if (error) throw new Error("Error signing in anonymously");
-
-  keyHippo = new KeyHippo(supabase, console);
-  userId = data.user!.id;
+  testSetup = await setupTest();
 
   const keyDescription = "Test Key for x-kh-api-key";
-  const result = await keyHippo.createApiKey(userId, keyDescription);
+  const result = await testSetup.keyHippo.createApiKey(
+    testSetup.userId,
+    keyDescription,
+  );
   apiKey = result.apiKey!;
 
   const uniqueEmail = `testuser+${uuidv4()}@example.com`;
@@ -59,7 +50,7 @@ beforeAll(async () => {
         Prefer: "return=representation",
       },
       body: JSON.stringify({
-        user_id: userId,
+        user_id: testSetup.userId,
         name: "Test User",
         email: uniqueEmail,
       }),
@@ -71,13 +62,13 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    const keyInfos = await keyHippo.loadApiKeyInfo(userId);
+    const keyInfos = await testSetup.keyHippo.loadApiKeyInfo(testSetup.userId);
     for (const keyInfo of keyInfos) {
-      await keyHippo.revokeApiKey(userId, keyInfo.id);
+      await testSetup.keyHippo.revokeApiKey(testSetup.userId, keyInfo.id);
     }
 
     await fetchData(
-      `${process.env.SUPABASE_URL}/rest/v1/test_accounts?user_id=eq.${userId}`,
+      `${process.env.SUPABASE_URL}/rest/v1/test_accounts?user_id=eq.${testSetup.userId}`,
       { method: "DELETE" },
     );
   } catch (error) {
@@ -158,7 +149,7 @@ describe("PostgREST Integration Tests", () => {
         },
         body: JSON.stringify({
           id: newAccountId,
-          user_id: userId,
+          user_id: testSetup.userId,
           name: "New Test User",
           email: newEmail,
         }),
@@ -187,16 +178,17 @@ describe("PostgREST Integration Tests", () => {
   });
 
   it("should fail when accessing a user's data with a valid key for a different user", async () => {
-    const { data: newUserData } = await supabase.auth.signInAnonymously();
+    const { data: newUserData } =
+      await testSetup.supabase.auth.signInAnonymously();
     const newUserId = newUserData.user!.id;
-    const newUserKeyResult = await keyHippo.createApiKey(
+    const newUserKeyResult = await testSetup.keyHippo.createApiKey(
       newUserId,
       "Test Key for New User",
     );
     const newUserApiKey = newUserKeyResult.apiKey!;
 
     const data = await fetchData(
-      `${process.env.SUPABASE_URL}/rest/v1/test_accounts?user_id=eq.${userId}`,
+      `${process.env.SUPABASE_URL}/rest/v1/test_accounts?user_id=eq.${testSetup.userId}`,
       {
         method: "GET",
         headers: { "x-kh-api-key": newUserApiKey },
@@ -206,6 +198,6 @@ describe("PostgREST Integration Tests", () => {
     expect(Array.isArray(data)).toBe(true);
     expect(data.length).toBe(0);
 
-    await keyHippo.revokeApiKey(newUserId, newUserKeyResult.id);
+    await testSetup.keyHippo.revokeApiKey(newUserId, newUserKeyResult.id);
   });
 });
