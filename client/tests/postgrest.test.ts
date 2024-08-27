@@ -201,4 +201,27 @@ describe("PostgREST Integration Tests", () => {
 
     await testSetup.keyHippo.revokeApiKey(newUserId, newUserKeyResult.id);
   });
+
+  describe("Keyhippo Schema Tests", () => {
+    const keyhippoHeaders = {
+      "Accept-Profile": "keyhippo",
+      Accept: "application/json",
+    };
+
+    it("should access the api_key_id_created table in keyhippo schema", async () => {
+      const data = await fetchData(
+        `${process.env.SUPABASE_URL}/rest/v1/api_key_id_created?select=*`,
+        { method: "GET" },
+        keyhippoHeaders,
+      );
+
+      expect(Array.isArray(data)).toBe(true);
+      expect(data.length).toBeGreaterThan(0);
+
+      const expectedProperties = ["api_key_id", "created", "owner_id"];
+      expectedProperties.forEach((prop) => {
+        expect(data[0]).toHaveProperty(prop);
+      });
+    });
+  });
 });
