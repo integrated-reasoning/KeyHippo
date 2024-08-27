@@ -251,7 +251,7 @@ export const getAllKeyMetadata = (
         });
       }
       const metadata: ApiKeyMetadata[] = result.data.map((item: any) => ({
-        api_key_reference: item.api_key_reference,
+        api_key_id: item.api_key_id,
         name: item.name || "",
         permission: item.permission || "",
         last_used: item.last_used,

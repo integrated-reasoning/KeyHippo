@@ -36,7 +36,7 @@ export interface ApiKeyResult {
 }
 
 export type ApiKeyMetadata = {
-  api_key_reference: string;
+  api_key_id: string;
   name: string;
   permission: string;
   last_used: string;

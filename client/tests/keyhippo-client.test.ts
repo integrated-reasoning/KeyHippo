@@ -50,7 +50,7 @@ describe("KeyHippo Client Tests", () => {
 
     expect(Array.isArray(metadata)).toBe(true);
     expect(metadata.length).toBeGreaterThan(0);
-    expect(metadata[0]).toHaveProperty("api_key_reference");
+    expect(metadata[0]).toHaveProperty("api_key_id");
     expect(metadata[0]).toHaveProperty("name");
     expect(metadata[0]).toHaveProperty("permission");
     expect(metadata[0]).toHaveProperty("last_used");
