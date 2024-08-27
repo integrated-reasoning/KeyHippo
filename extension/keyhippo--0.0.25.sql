@@ -699,23 +699,9 @@ GRANT ALL ON FUNCTION keyhippo.revoke_api_key (TEXT, TEXT) TO authenticated;
 
 GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo TO authenticated;
 
-GRANT SELECT ON auth.jwts TO authenticated;
-
-GRANT SELECT ON auth.jwts TO service_role;
-
-GRANT SELECT ON vault.decrypted_secrets TO authenticated;
-
-GRANT SELECT ON vault.decrypted_secrets TO service_role;
-
-GRANT USAGE ON SCHEMA auth TO authenticated;
-
-GRANT USAGE ON SCHEMA auth TO service_role;
+GRANT SELECT ON auth.jwts TO authenticated, service_role;
 
 GRANT USAGE ON SCHEMA keyhippo TO authenticated, service_role, anon;
-
-GRANT USAGE ON SCHEMA vault TO authenticated;
-
-GRANT USAGE ON SCHEMA vault TO service_role;
 
 -- Set up vault secrets
 SELECT
