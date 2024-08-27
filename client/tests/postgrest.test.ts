@@ -12,20 +12,21 @@ const headers = () => ({
   "x-kh-api-key": apiKey,
 });
 
-const fetchData = async (url: string, options: RequestInit = {}) => {
+const fetchData = async (
+  url: string,
+  options: RequestInit = {},
+  additionalHeaders: Record<string, string> = {},
+) => {
   const response = await fetch(url, {
     ...options,
-    headers: { ...headers(), ...options.headers },
+    headers: { ...headers(), ...additionalHeaders, ...options.headers },
   });
   const responseBody = await response.text();
-
   const data = responseBody ? JSON.parse(responseBody) : null;
-
   if (!response.ok) {
     console.error("Error Response Body:", data);
     throw new Error(`Error: ${response.statusText}`);
   }
-
   return data;
 };
 
