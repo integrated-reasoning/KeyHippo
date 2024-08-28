@@ -106,6 +106,7 @@ CREATE OR REPLACE FUNCTION keyhippo.setup_project_api_key_secret ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     secret_exists boolean;
@@ -134,6 +135,7 @@ CREATE OR REPLACE FUNCTION keyhippo.setup_project_jwt_secret ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     secret_exists boolean;
@@ -162,6 +164,7 @@ CREATE OR REPLACE FUNCTION keyhippo.setup_vault_secrets ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     PERFORM
@@ -176,7 +179,7 @@ CREATE OR REPLACE FUNCTION keyhippo.load_api_key_info (id_of_user text)
     RETURNS jsonb
     LANGUAGE plpgsql
     SECURITY DEFINER
-    SET search_path = extensions
+    SET search_path = extensions, pg_temp
     AS $$
 DECLARE
     key_info jsonb := '[]'::jsonb;
@@ -231,6 +234,7 @@ CREATE OR REPLACE FUNCTION keyhippo.create_api_key (id_of_user text, key_descrip
     RETURNS text
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     api_key text;
@@ -379,6 +383,7 @@ CREATE OR REPLACE FUNCTION keyhippo.revoke_api_key (id_of_user text, secret_id t
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     owner_id uuid;
@@ -419,6 +424,8 @@ CREATE OR REPLACE FUNCTION keyhippo.get_api_key_metadata (id_of_user uuid)
         total_cost double precision,
         revoked timestamptz)
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     RETURN QUERY
@@ -451,6 +458,7 @@ CREATE OR REPLACE FUNCTION auth.keyhippo_check (owner_id uuid)
     RETURNS boolean
     LANGUAGE sql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
     SELECT
         (auth.uid () = owner_id)
@@ -483,6 +491,7 @@ CREATE OR REPLACE FUNCTION keyhippo.check_request ()
     RETURNS void
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     req_app_api_key text := current_setting('request.headers', TRUE)::json ->> 'x-app-api-key';
@@ -536,7 +545,7 @@ CREATE OR REPLACE FUNCTION keyhippo.handle_new_user ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
     SECURITY DEFINER
-    SET search_path = ''
+    SET search_path = pg_temp
     AS $$
 BEGIN
     INSERT INTO keyhippo.user_ids (id)
@@ -552,7 +561,7 @@ CREATE OR REPLACE FUNCTION keyhippo.create_user_api_key_secret ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
     SECURITY DEFINER
-    SET search_path = extensions
+    SET search_path = extensions, pg_temp
     AS $$
 DECLARE
     rand_bytes bytea := extensions.gen_random_bytes(32);
@@ -571,7 +580,7 @@ CREATE OR REPLACE FUNCTION keyhippo.remove_user_vault_secrets ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
     SECURITY DEFINER
-    SET search_path = keyhippo
+    SET search_path = keyhippo, pg_temp
     AS $$
 DECLARE
     jwt_record RECORD;
@@ -600,7 +609,7 @@ CREATE OR REPLACE FUNCTION keyhippo.get_api_key (id_of_user text, secret_id text
     RETURNS text
     LANGUAGE plpgsql
     SECURITY DEFINER
-    SET search_path = extensions
+    SET search_path = extensions, pg_temp
     AS $$
 DECLARE
     jwt text;
