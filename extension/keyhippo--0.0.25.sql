@@ -640,7 +640,6 @@ GRANT USAGE ON SCHEMA keyhippo TO authenticated, service_role, anon;
 -- Set up vault secrets
 SELECT
     keyhippo.setup_vault_secrets ();
-COMMENT ON FUNCTION keyhippo.setup_vault_secrets () IS 'Run this function to set up or update KeyHippo vault secrets';
 -- Cleanup setup functions
 DROP FUNCTION keyhippo.setup_vault_secrets ();
 DROP FUNCTION keyhippo.setup_project_jwt_secret ();
