@@ -16,7 +16,7 @@ runs:
         version: latest
 
     - name: Start Supabase
-      working-directory: ./client
+      working-directory: ./client/tests
       shell: bash
       run: |
         supabase start
