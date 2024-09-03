@@ -40,15 +40,42 @@ $$;
 -- 2. Execute the function to handle existing users
 SELECT
     keyhippo_temp.handle_existing_users ();
--- 3. Drop the temporary function
-DROP FUNCTION keyhippo_temp.handle_existing_users ();
--- 4. Update policy for keyhippo.api_key_id_created table
-DROP POLICY IF EXISTS "select_policy_api_key_id_created" ON keyhippo.api_key_id_created;
-CREATE POLICY "select_policy_api_key_id_created" ON keyhippo.api_key_id_created
-    FOR SELECT TO anon, authenticated
-        USING ((COALESCE(auth.uid (), keyhippo.key_uid ()) = owner_id));
--- 5. Grant SELECT permission on keyhippo.api_key_id_created
-GRANT SELECT ON TABLE keyhippo.api_key_id_created TO anon, authenticated;
+-- 3. Create a function to update policies with elevated privileges
+CREATE OR REPLACE FUNCTION keyhippo_temp.update_policies ()
+    RETURNS void
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = keyhippo, pg_temp
+    AS $$
+DECLARE
+    tbl_name text;
+BEGIN
+    FOR tbl_name IN
+    SELECT
+        table_name
+    FROM
+        information_schema.tables
+    WHERE
+        table_schema = 'keyhippo'
+        AND table_name LIKE 'api_key_id_%' LOOP
+            EXECUTE format('
+            DROP POLICY IF EXISTS "select_policy_%1$s" ON keyhippo.%1$I;
+            CREATE POLICY "select_policy_%1$s" ON keyhippo.%1$I
+                FOR SELECT TO anon, authenticated
+                USING ((SELECT auth.uid() = owner_id) OR
+                    (SELECT keyhippo.key_uid() = owner_id)
+                );
+            GRANT SELECT ON TABLE keyhippo.%1$I TO anon, authenticated;
+        ', tbl_name);
+        END LOOP;
+END;
+$$;
+-- 4. Execute the policy update function
+SELECT
+    keyhippo_temp.update_policies ();
+-- 5. Drop all temporary functions
+DROP FUNCTION IF EXISTS keyhippo_temp.handle_existing_users ();
+DROP FUNCTION IF EXISTS keyhippo_temp.update_policies ();
 -- Drop temporary schema
 DROP SCHEMA IF EXISTS keyhippo_temp CASCADE;
 -- Commit transaction
