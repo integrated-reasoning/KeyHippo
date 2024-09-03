@@ -46,7 +46,7 @@ setup-supabase:
 	@echo "CREATE EXTENSION IF NOT EXISTS pgjwt;" >> create_schema.sql
 	@echo "CREATE SCHEMA IF NOT EXISTS keyhippo;" >> create_schema.sql
 	PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f create_schema.sql
-	@for file in $$(find ../extension/ -type f -name "keyhippo--*.sql" | sort -V); do \
+	@for file in $$(find ../extension/ -type f -name "keyhippo*--*.sql" | sort -V); do \
 		PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f "$$file"; \
 	done
 
