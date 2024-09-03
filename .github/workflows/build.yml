@@ -43,17 +43,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - uses: ./.github/actions/setup-integration-tests
-      - name: Create KeyHippo schema and extensions
-        working-directory: ./client
-        run: |
-          cat << EOF > create_schema.sql
-          CREATE EXTENSION IF NOT EXISTS pgcrypto;
-          CREATE EXTENSION IF NOT EXISTS pgjwt;
-          CREATE SCHEMA IF NOT EXISTS keyhippo;
-          EOF
-
-          PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f create_schema.sql
-
       - name: Install KeyHippo extension
         working-directory: ./client
         run: |
@@ -61,7 +50,6 @@ jobs:
             PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f "$file"
           done
 
-      - uses: ./.github/actions/apply-integration-test-migrations
       - uses: ./.github/actions/setup-environment
       - name: Install dependencies
         working-directory: ./client
