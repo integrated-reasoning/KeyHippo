@@ -22,11 +22,15 @@ const result = await keyHippo.createApiKey(userId, "Primary API Key");
 // Revoke an API key
 await keyHippo.revokeApiKey(apiKeyId);
 
-// Get information about an API key
-const keyInfo = await keyHippo.loadApiKeyInfo(apiKeyId);
+// Load all API keys' information for a specific user
+const keyInfos = await keyHippo.loadApiKeyInfo(userId);
+// Returns an array of `ApiKeyInfo` objects containing basic details about each API key associated with the user,
+// such as the key's ID and description. If no keys are found, an empty array is returned.
 
-// Get all API keys for a user
-const allKeys = await keyHippo.getAllKeyMetadata(userId);
+// Get metadata for all API keys associated with a user
+const metadata = await keyHippo.getAllKeyMetadata(userId);
+// Returns an array of `ApiKeyMetadata` objects, which include detailed metadata for each API key,
+// such as usage statistics, creation date, and revocation status. If no keys are found, an empty array is returned.
 ```
 
 ## Documentation
