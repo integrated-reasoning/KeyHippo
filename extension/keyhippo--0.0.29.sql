@@ -18,6 +18,13 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ *
+ * ██╗  ██╗███████╗██╗   ██╗██╗  ██╗██╗██████╗ ██████╗  ██████╗
+ * ██║ ██╔╝██╔════╝╚██╗ ██╔╝██║  ██║██║██╔══██╗██╔══██╗██╔═══██╗
+ * █████╔╝ █████╗   ╚████╔╝ ███████║██║██████╔╝██████╔╝██║   ██║
+ * ██╔═██╗ ██╔══╝    ╚██╔╝  ██╔══██║██║██╔═══╝ ██╔═══╝ ██║   ██║
+ * ██║  ██╗███████╗   ██║   ██║  ██║██║██║     ██║     ╚██████╔╝
+ * ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝     ╚═╝      ╚═════╝
  */
 BEGIN;
 -- Create the necessary schemas
@@ -655,9 +662,6 @@ DROP FUNCTION keyhippo.setup_project_jwt_secret ();
 DROP FUNCTION keyhippo.setup_project_api_key_secret ();
 NOTIFY pgrst,
 'reload config';
-COMMIT;
-
-BEGIN;
 -- Create temporary schema
 CREATE SCHEMA IF NOT EXISTS keyhippo_temp;
 -- 1. Create temporary function to handle existing users
