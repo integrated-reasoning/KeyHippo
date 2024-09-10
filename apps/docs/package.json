@@ -1,0 +1,31 @@
+{
+  "name": "docs",
+  "version": "0.0.31",
+  "description": "KeyHippo docs",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/integrated-reasoning/KeyHippo.git"
+  },
+  "author": "David Cox <david@integrated-reasoning.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/integrated-reasoning/KeyHippo/issues"
+  },
+  "homepage": "https://keyhippo.com",
+  "dependencies": {
+    "next": "^14.2.3",
+    "nextra": "latest",
+    "nextra-theme-docs": "latest",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.12.7",
+    "typescript": "5.3.3"
+  }
+}
