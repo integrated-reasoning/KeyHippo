@@ -55,9 +55,9 @@ export class KeyHippo {
     );
   }
 
-  async authenticate(request: Request) {
+  async authenticate(headers: Headers) {
     return Effect.runPromise(
-      authenticateEffect(request, this.supabase, this.logger),
+      authenticateEffect(headers, this.supabase, this.logger),
     );
   }
 }

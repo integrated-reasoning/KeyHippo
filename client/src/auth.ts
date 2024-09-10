@@ -3,14 +3,14 @@ import { SupabaseClient } from "@supabase/supabase-js";
 import { AppError, AuthResult, Logger } from "./types";
 
 export const authenticate = (
-  request: Request,
+  headers: Headers,
   supabase: SupabaseClient,
   logger: Logger,
 ): Effect.Effect<AuthResult, AppError> =>
   pipe(
     Effect.tryPromise({
       try: async () => {
-        const authHeader = request.headers.get("Authorization");
+        const authHeader = headers.get("Authorization");
         if (authHeader && authHeader.startsWith("Bearer ")) {
           const apiKey = authHeader.split(" ")[1];
           const { data: userId, error: apiKeyError } = await supabase

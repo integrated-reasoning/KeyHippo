@@ -68,13 +68,11 @@ describe("KeyHippo Client Tests", () => {
       keyDescription,
     );
 
-    const mockRequest = new Request("https://example.com", {
-      headers: {
-        Authorization: `Bearer ${createdKey.apiKey}`,
-      },
+    const mockHeaders = new Headers({
+      Authorization: `Bearer ${createdKey.apiKey}`,
     });
 
-    const authResult = await testSetup.keyHippo.authenticate(mockRequest);
+    const authResult = await testSetup.keyHippo.authenticate(mockHeaders);
 
     expect(authResult).toHaveProperty("userId");
     expect(authResult).toHaveProperty("supabase");
