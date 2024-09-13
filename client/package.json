@@ -44,7 +44,7 @@
     "tsup": "^8.0.2"
   },
   "peerDependencies": {
-    "@supabase/ssr": "^0.3.0",
-    "@supabase/supabase-js": "^2.44.4"
+    "@supabase/ssr": ">=0.3.0",
+    "@supabase/supabase-js": ">=2.44.4"
   }
 }
