@@ -36,8 +36,6 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE EXTENSION IF NOT EXISTS pgjwt;
 
-CREATE EXTENSION IF NOT EXISTS pgsodium;
-
 -- Create required tables in the auth and keyhippo schemas
 CREATE TABLE IF NOT EXISTS auth.jwts (
     secret_id uuid PRIMARY KEY,
