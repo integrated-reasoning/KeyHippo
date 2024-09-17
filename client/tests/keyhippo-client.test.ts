@@ -63,20 +63,25 @@ describe("KeyHippo Client Tests", () => {
 
   it("should authenticate with an API key", async () => {
     const keyDescription = "Auth Test Key";
-    const createdKey = await testSetup.keyHippo.createApiKey(
+    const createdKeyInfo = await testSetup.keyHippo.createApiKey(
       testSetup.userId,
       keyDescription,
     );
-
+    const createdKey = createdKeyInfo.apiKey;
     const mockHeaders = new Headers({
-      Authorization: `Bearer ${createdKey.apiKey}`,
+      Authorization: `Bearer ${createdKey}`,
     });
+    const { userId, supabase } =
+      await testSetup.keyHippo.authenticate(mockHeaders);
 
-    const authResult = await testSetup.keyHippo.authenticate(mockHeaders);
+    expect(userId).toBe(testSetup.userId);
+    expect(supabase).toBeDefined();
 
-    expect(authResult).toHaveProperty("userId");
-    expect(authResult).toHaveProperty("supabase");
-    expect(authResult.userId).toBe(testSetup.userId);
+    const { data: obtainedUserId, error: _ } = await supabase
+      .schema("keyhippo")
+      .rpc("get_uid_for_key", { user_api_key: createdKey });
+
+    expect(obtainedUserId).toBe(userId);
   });
 
   it("should revoke an API key", async () => {

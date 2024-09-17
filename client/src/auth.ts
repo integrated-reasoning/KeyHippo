@@ -1,5 +1,5 @@
 import { Effect, pipe } from "effect";
-import { SupabaseClient } from "@supabase/supabase-js";
+import { SupabaseClient, createClient } from "@supabase/supabase-js";
 import { AppError, AuthResult, Logger } from "./types";
 
 export const authenticate = (
@@ -21,6 +21,18 @@ export const authenticate = (
           if (!userId) {
             throw new Error(`Invalid API key: ${apiKey}`);
           }
+          supabase = createClient(
+            (supabase as any).supabaseUrl, // cast away protected
+            (supabase as any).supabaseKey,
+            {
+              global: { headers: { Authorization: apiKey } },
+              auth: {
+                persistSession: false,
+                detectSessionInUrl: false,
+                autoRefreshToken: false,
+              },
+            },
+          );
           return { userId, supabase };
         } else {
           const {
