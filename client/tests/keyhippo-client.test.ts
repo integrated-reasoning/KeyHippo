@@ -86,15 +86,15 @@ describe("KeyHippo Client Tests", () => {
 
   it("should revoke an API key", async () => {
     const keyDescription = "Key to be revoked";
-    const createdKey = await testSetup.keyHippo.createApiKey(
+    const createdKeyInfo = await testSetup.keyHippo.createApiKey(
       testSetup.userId,
       keyDescription,
     );
 
-    await testSetup.keyHippo.revokeApiKey(testSetup.userId, createdKey.id);
+    await testSetup.keyHippo.revokeApiKey(testSetup.userId, createdKeyInfo.id);
 
     const keyInfos = await testSetup.keyHippo.loadApiKeyInfo(testSetup.userId);
-    const revokedKey = keyInfos.find((key) => key.id === createdKey.id);
+    const revokedKey = keyInfos.find((key) => key.id === createdKeyInfo.id);
 
     expect(revokedKey).toBeUndefined();
   });
