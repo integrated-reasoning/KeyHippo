@@ -13,14 +13,6 @@ export const authenticate = (
         const authHeader = headers.get("Authorization");
         if (authHeader && authHeader.startsWith("Bearer ")) {
           const apiKey = authHeader.split(" ")[1];
-          const { data: userId, error: apiKeyError } = await supabase
-            .schema("keyhippo")
-            .rpc("get_uid_for_key", { user_api_key: apiKey });
-
-          if (apiKeyError) throw apiKeyError;
-          if (!userId) {
-            throw new Error(`Invalid API key: ${apiKey}`);
-          }
           supabase = createClient(
             (supabase as any).supabaseUrl, // cast away protected
             (supabase as any).supabaseKey,
@@ -33,6 +25,13 @@ export const authenticate = (
               },
             },
           );
+          const { data: userId, error: apiKeyError } = await supabase
+            .schema("keyhippo")
+            .rpc("get_uid_for_key", { user_api_key: apiKey });
+          if (apiKeyError) throw apiKeyError;
+          if (!userId) {
+            throw new Error(`Invalid API key: ${apiKey}`);
+          }
           return { userId, supabase };
         } else {
           const {
