@@ -2,6 +2,11 @@
 SRC_DIR := src
 TEST_DIR := tests
 BUILD_DIR := dist
+PG_HOST := localhost
+PG_PORT := 54322
+PG_USER := postgres
+PG_DB := postgres
+PG_PASSWORD := postgres
 
 # Default goal
 .DEFAULT_GOAL := help
@@ -15,6 +20,8 @@ help:
 	@echo "  build       - Build the TypeScript project"
 	@echo "  setup-supabase - Set up Supabase for testing"
 	@echo "  test        - Run tests with coverage (includes Supabase setup)"
+	@echo "  pg_tap      - Run pg_tap tests"
+	@echo "  integration-tests - Run integration tests with pg_tap"
 
 # Clean target
 .PHONY: clean
@@ -45,9 +52,9 @@ setup-supabase:
 	@echo "CREATE EXTENSION IF NOT EXISTS pgcrypto;" > create_schema.sql
 	@echo "CREATE EXTENSION IF NOT EXISTS pgjwt;" >> create_schema.sql
 	@echo "CREATE SCHEMA IF NOT EXISTS keyhippo;" >> create_schema.sql
-	PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f create_schema.sql
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f create_schema.sql
 	@for file in $$(find ../extension/ -type f -name "keyhippo--*.sql" | sort -V); do \
-		PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f "$$file"; \
+		PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f "$$file"; \
 	done
 
 # Apply integration test migrations
@@ -69,12 +76,17 @@ apply-integration-test-migrations:
 	@echo "" >> create_test_accounts.sql
 	@echo "GRANT SELECT ON public.test_accounts TO anon, authenticated;" >> create_test_accounts.sql
 	@echo "GRANT INSERT, UPDATE, DELETE ON public.test_accounts TO authenticated;" >> create_test_accounts.sql
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f create_test_accounts.sql
 
-	PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -f create_test_accounts.sql
+# Run pg_tap tests
+.PHONY: pg_tap
+pg_tap:
+	@echo "Running pg_tap tests..."
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/tests.sql
 
 # Run tests with coverage (including Supabase setup and migrations)
 .PHONY: test
-test: install setup-supabase apply-integration-test-migrations
+test: install setup-supabase apply-integration-test-migrations pg_tap
 	@echo "Running tests..."
 	@if [ -f .env.test ]; then \
 		export $$(cat .env.test | xargs) && pnpm run test --coverage; \
