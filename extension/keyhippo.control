@@ -1,5 +1,11 @@
 # keyhippo extension
 comment = 'RLS-compatible API keys for PostgreSQL'
-default_version = '0.0.36'
+default_version = '0.0.37'
 module_pathname = '$libdir/keyhippo/extension'
 relocatable = true
+updates = {
+    '0.0.34' = {
+        file = 'keyhippo@keyhippo--0.0.34--0.0.37.sql',
+        requires = {'0.0.34'}
+    }
+}
