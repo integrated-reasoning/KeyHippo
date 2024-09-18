@@ -53,7 +53,8 @@ setup-supabase:
 	@echo "CREATE EXTENSION IF NOT EXISTS pgjwt;" >> create_schema.sql
 	@echo "CREATE SCHEMA IF NOT EXISTS keyhippo;" >> create_schema.sql
 	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f create_schema.sql
-	@for file in $$(find ../extension/ -type f -name "keyhippo--*.sql" | sort -V); do \
+	@for file in $$(find ../extension/ -type f -name "keyhippo*--*.sql" | sort -V); do \
+		echo "Applying migration: $$file" ; \
 		PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f "$$file"; \
 	done
 
