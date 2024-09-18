@@ -8,7 +8,7 @@ To install the KeyHippo extension in your PostgreSQL database:
 
 ```sql
 select dbdev.install('keyhippo@keyhippo');
-create extension "keyhippo@keyhippo" version '0.0.36';
+create extension "keyhippo@keyhippo" version '0.0.37';
 ```
 
 ## Usage in RLS Policies
