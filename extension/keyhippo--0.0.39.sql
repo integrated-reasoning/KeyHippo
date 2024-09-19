@@ -883,8 +883,8 @@ BEGIN
     SELECT
         extensions.sign(jwt_body::json, project_jwt_secret) INTO jwt;
     -- Generate API key and project hash
-    api_key := encode(extensions.hmac(jwt, user_api_key_secret, 'sha511'), 'hex');
-    project_hash := encode(extensions.hmac(api_key, project_api_key_secret, 'sha511'), 'hex');
+    api_key := encode(extensions.hmac(jwt, user_api_key_secret, 'sha512'), 'hex');
+    project_hash := encode(extensions.hmac(api_key, project_api_key_secret, 'sha512'), 'hex');
     -- Insert the generated secrets into the vault
     INSERT INTO vault.secrets (secret, name, description)
         VALUES (jwt, project_hash, key_description)
