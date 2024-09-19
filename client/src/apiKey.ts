@@ -5,6 +5,7 @@ import {
   ApiKeyInfo,
   ApiKeyMetadata,
   CompleteApiKeyInfo,
+  RotateApiKeyResult,
   AppError,
   Logger,
 } from "./types";
@@ -277,3 +278,63 @@ export const getAllKeyMetadata = (
       ),
     ),
   );
+
+export const rotateApiKey = (
+  supabase: SupabaseClient<any, "public", any>,
+  userId: string,
+  apiKeyId: string,
+  logger: Logger,
+): Effect.Effect<CompleteApiKeyInfo, AppError> => {
+  type RotateApiKeyResult = {
+    new_api_key: string;
+    new_api_key_id: string;
+  };
+
+  return pipe(
+    Effect.tryPromise({
+      try: () =>
+        supabase.schema("keyhippo").rpc("rotate_api_key", {
+          p_api_key_id: apiKeyId,
+        }),
+      catch: (error): AppError => ({
+        _tag: "DatabaseError",
+        message: `Failed to rotate API key: ${String(error)}`,
+      }),
+    }),
+    Effect.flatMap((result: PostgrestSingleResponse<RotateApiKeyResult[]>) => {
+      if (result.error) {
+        return Effect.fail<AppError>({
+          _tag: "DatabaseError",
+          message: `Error rotating API key: ${result.error.message}`,
+        });
+      }
+      if (!Array.isArray(result.data) || result.data.length === 0) {
+        return Effect.fail<AppError>({
+          _tag: "DatabaseError",
+          message: "No data returned after rotating API key",
+        });
+      }
+      const dataItem = result.data[0];
+
+      const completeApiKeyInfo: CompleteApiKeyInfo = {
+        id: dataItem.new_api_key_id,
+        description: "", // You may need to fetch or retain the description
+        apiKey: dataItem.new_api_key,
+        status: "success" as const, // Ensure 'status' is of type '"success" | "failed"'
+      };
+      return Effect.succeed(completeApiKeyInfo);
+    }),
+    Effect.tap((rotatedKeyInfo: CompleteApiKeyInfo) =>
+      Effect.sync(() =>
+        logger.info(
+          `API key rotated for user: ${userId}, New Key ID: ${rotatedKeyInfo.id}`,
+        ),
+      ),
+    ),
+    Effect.tapError((error: AppError) =>
+      Effect.sync(() =>
+        logger.error(`Failed to rotate API key: ${error.message}`),
+      ),
+    ),
+  );
+};

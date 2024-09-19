@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { KeyHippo } from "../src/index";
 import { setupTest, TestSetup } from "./testSetup";
+import { createClient } from "@supabase/supabase-js";
 
 let testSetup: TestSetup;
 
@@ -109,5 +111,69 @@ describe("KeyHippo Client Tests", () => {
     await expect(
       testSetup.keyHippo.getAllKeyMetadata("non-existent-user"),
     ).rejects.toThrow("Error getting API key metadata");
+  });
+
+  it("should rotate an API key", async () => {
+    const keyDescription = "Key to Rotate";
+    const createdKeyInfo = await testSetup.keyHippo.createApiKey(
+      testSetup.userId,
+      keyDescription,
+    );
+
+    const rotatedKeyInfo = await testSetup.keyHippo.rotateApiKey(
+      testSetup.userId,
+      createdKeyInfo.id,
+    );
+
+    expect(rotatedKeyInfo).toHaveProperty("id");
+    expect(rotatedKeyInfo).toHaveProperty("apiKey");
+    expect(rotatedKeyInfo.status).toBe("success");
+
+    // Verify the old API key is revoked
+    const keyInfos = await testSetup.keyHippo.loadApiKeyInfo(testSetup.userId);
+    const oldKeyExists = keyInfos.some((key) => key.id === createdKeyInfo.id);
+    expect(oldKeyExists).toBe(false);
+
+    // Verify the new API key works
+    const mockHeaders = new Headers({
+      Authorization: `Bearer ${rotatedKeyInfo.apiKey}`,
+    });
+    const { userId, supabase } =
+      await testSetup.keyHippo.authenticate(mockHeaders);
+
+    expect(userId).toBe(testSetup.userId);
+    expect(supabase).toBeDefined();
+  });
+
+  it("should handle errors when rotating a non-existent API key", async () => {
+    await expect(
+      testSetup.keyHippo.rotateApiKey(testSetup.userId, "invalid-api-key-id"),
+    ).rejects.toThrow("Error rotating API key");
+  });
+
+  it("should not rotate an API key owned by another user", async () => {
+    // Create another user and API key with a separate Supabase client
+    const supabase = createClient(
+      process.env.SUPABASE_URL!,
+      process.env.SUPABASE_ANON_KEY!,
+    );
+    const { data: newUserData } = await supabase.auth.signInAnonymously();
+    const newUserId = newUserData.user!.id;
+    const newUserKeyHippo = new KeyHippo(supabase, console);
+    const newUserKeyInfo = await newUserKeyHippo.createApiKey(
+      newUserId,
+      "Another User's Key",
+    );
+
+    // Use the original user's Supabase client
+    const originalUserKeyHippo = testSetup.keyHippo;
+
+    // Attempt to rotate the new user's API key as the original user
+    await expect(
+      originalUserKeyHippo.rotateApiKey(testSetup.userId, newUserKeyInfo.id),
+    ).rejects.toThrow("Error rotating API key");
+
+    // Clean up
+    await newUserKeyHippo.revokeApiKey(newUserId, newUserKeyInfo.id);
   });
 });

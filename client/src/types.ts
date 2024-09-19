@@ -35,6 +35,11 @@ export interface ApiKeyResult {
   message?: string;
 }
 
+export type RotateApiKeyResult = {
+  new_api_key: string;
+  new_api_key_id: string;
+};
+
 export type ApiKeyMetadata = {
   api_key_id: string;
   name: string;

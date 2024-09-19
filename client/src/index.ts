@@ -5,6 +5,7 @@ import {
   createApiKey as createApiKeyEffect,
   loadApiKeyInfo as loadApiKeyInfoEffect,
   revokeApiKey as revokeApiKeyEffect,
+  rotateApiKey as rotateApiKeyEffect,
   getAllKeyMetadata as getAllKeyMetadataEffect,
 } from "./apiKey";
 import { authenticate as authenticateEffect } from "./auth";
@@ -51,6 +52,16 @@ export class KeyHippo {
         getAllKeyMetadataEffect(this.supabase, userId, this.logger),
         (error: AppError) =>
           Effect.fail(`Error getting API key metadata: ${error.message}`),
+      ),
+    );
+  }
+
+  async rotateApiKey(userId: string, apiKeyId: string) {
+    return Effect.runPromise(
+      Effect.catchAll(
+        rotateApiKeyEffect(this.supabase, userId, apiKeyId, this.logger),
+        (error: AppError) =>
+          Effect.fail(`Error rotating API key: ${error.message}`),
       ),
     );
   }
