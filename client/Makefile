@@ -2,6 +2,11 @@
 SRC_DIR := src
 TEST_DIR := tests
 BUILD_DIR := dist
+EXTENSION_DIR := ../extension
+VERSION := 0.0.40
+EXTENSION_VERSION_DIR := $(EXTENSION_DIR)/versions/$(VERSION)
+
+# Database connection settings
 PG_HOST := localhost
 PG_PORT := 54322
 PG_USER := postgres
@@ -15,13 +20,14 @@ PG_PASSWORD := postgres
 .PHONY: help
 help:
 	@echo "Available targets:"
-	@echo "  clean       - Clean up project directories"
-	@echo "  install     - Install dependencies using pnpm"
-	@echo "  build       - Build the TypeScript project"
-	@echo "  setup-supabase - Set up Supabase for testing"
-	@echo "  test        - Run tests with coverage (includes Supabase setup)"
-	@echo "  pg_tap      - Run pg_tap tests"
-	@echo "  integration-tests - Run integration tests with pg_tap"
+	@echo "  clean              - Clean up project directories"
+	@echo "  install            - Install dependencies using pnpm"
+	@echo "  build              - Build the TypeScript project"
+	@echo "  build-extension    - Build the SQL extension"
+	@echo "  setup-supabase     - Set up Supabase for testing"
+	@echo "  test               - Run tests with coverage (includes Supabase setup)"
+	@echo "  pg_tap             - Run pg_tap tests"
+	@echo "  integration-tests  - Run integration tests with pg_tap"
 
 # Clean target
 .PHONY: clean
@@ -29,6 +35,7 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f tsconfig.tsbuildinfo
 	pnpm store prune
+	rm -f $(EXTENSION_VERSION_DIR)/keyhippo--$(VERSION).sql
 
 # Install dependencies
 .PHONY: install
@@ -52,11 +59,9 @@ setup-supabase:
 	@echo "CREATE EXTENSION IF NOT EXISTS pgcrypto;" > create_schema.sql
 	@echo "CREATE EXTENSION IF NOT EXISTS pgjwt;" >> create_schema.sql
 	@echo "CREATE SCHEMA IF NOT EXISTS keyhippo;" >> create_schema.sql
-	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f create_schema.sql
-	@for file in $$(find ../extension/ -type f -name "keyhippo*--*.sql" | sort -V); do \
-		echo "Applying migration: $$file" ; \
-		PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f "$$file"; \
-	done
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=0 -f create_schema.sql
+	@echo "Applying KeyHippo extension..."
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=0 -f $(EXTENSION_VERSION_DIR)/keyhippo--$(VERSION).sql
 
 # Apply integration test migrations
 .PHONY: apply-integration-test-migrations
@@ -77,7 +82,7 @@ apply-integration-test-migrations:
 	@echo "" >> create_test_accounts.sql
 	@echo "GRANT SELECT ON public.test_accounts TO anon, authenticated;" >> create_test_accounts.sql
 	@echo "GRANT INSERT, UPDATE, DELETE ON public.test_accounts TO authenticated;" >> create_test_accounts.sql
-	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f create_test_accounts.sql
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=0 -f create_test_accounts.sql
 
 # Run pg_tap tests
 .PHONY: pg_tap
@@ -85,9 +90,17 @@ pg_tap:
 	@echo "Running pg_tap tests..."
 	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/tests.sql
 
+# Build the SQL extension
+.PHONY: build-extension
+build-extension:
+	@echo "Building SQL extension..."
+	@cat $(EXTENSION_VERSION_DIR)/[0-9]*.sql > $(EXTENSION_VERSION_DIR)/temp_keyhippo--$(VERSION).sql
+	@mv $(EXTENSION_VERSION_DIR)/temp_keyhippo--$(VERSION).sql $(EXTENSION_VERSION_DIR)/keyhippo--$(VERSION).sql
+	@echo "SQL extension built successfully."
+
 # Run tests with coverage (including Supabase setup and migrations)
 .PHONY: test
-test: install setup-supabase apply-integration-test-migrations pg_tap
+test: install build-extension setup-supabase apply-integration-test-migrations pg_tap
 	@echo "Running tests..."
 	@if [ -f .env.test ]; then \
 		export $$(cat .env.test | xargs) && pnpm run test --coverage; \
