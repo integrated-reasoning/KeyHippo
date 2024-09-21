@@ -728,9 +728,6 @@ DROP FUNCTION keyhippo.setup_project_jwt_secret ();
 
 DROP FUNCTION keyhippo.setup_project_api_key_secret ();
 
-NOTIFY pgrst,
-'reload config';
-
 -- Create temporary schema
 CREATE SCHEMA IF NOT EXISTS keyhippo_temp;
 
@@ -1041,3 +1038,546 @@ END;
 $$;
 
 GRANT EXECUTE ON FUNCTION keyhippo.rotate_api_key (uuid) TO authenticated;
+
+-- Create RBAC Schema
+CREATE SCHEMA IF NOT EXISTS keyhippo_rbac AUTHORIZATION postgres;
+
+-- Create ABAC Schema
+CREATE SCHEMA IF NOT EXISTS keyhippo_abac AUTHORIZATION postgres;
+
+-- Create Groups Table
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.groups (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    name text UNIQUE NOT NULL,
+    description text
+);
+
+-- Create Roles Table
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.roles (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    name text UNIQUE NOT NULL,
+    description text,
+    group_id uuid NOT NULL REFERENCES keyhippo_rbac.groups (id) ON DELETE CASCADE,
+    parent_role_id uuid REFERENCES keyhippo_rbac.roles (id) ON DELETE SET NULL
+);
+
+-- Create Permissions Table
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.permissions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    name text UNIQUE NOT NULL,
+    description text
+);
+
+-- Create Role-Permissions Mapping Table
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.role_permissions (
+    role_id uuid NOT NULL REFERENCES keyhippo_rbac.roles (id) ON DELETE CASCADE,
+    permission_id uuid NOT NULL REFERENCES keyhippo_rbac.permissions (id) ON DELETE CASCADE,
+    PRIMARY KEY (role_id, permission_id)
+);
+
+-- Create User-Group-Roles Mapping Table
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.user_group_roles (
+    user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+    group_id uuid NOT NULL REFERENCES keyhippo_rbac.groups (id) ON DELETE CASCADE,
+    role_id uuid NOT NULL REFERENCES keyhippo_rbac.roles (id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id, role_id)
+);
+
+-- Create User Attributes Table (ABAC)
+CREATE TABLE IF NOT EXISTS keyhippo_abac.user_attributes (
+    user_id uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
+    attributes jsonb DEFAULT '{}' ::jsonb
+);
+
+-- Create Policies Table (ABAC)
+CREATE TABLE IF NOT EXISTS keyhippo_abac.policies (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    name text UNIQUE NOT NULL,
+    description text,
+    policy JSONB NOT NULL
+);
+
+-- Create Claims Cache Table
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.claims_cache (
+    user_id uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
+    rbac_claims jsonb DEFAULT '{}' ::jsonb
+);
+
+-- Function: add_user_to_group
+CREATE OR REPLACE FUNCTION keyhippo_rbac.add_user_to_group (p_user_id uuid, p_group_id uuid, p_role_name text)
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+DECLARE
+    v_role_id uuid;
+BEGIN
+    -- Fetch the role ID based on role name and group
+    SELECT
+        id INTO v_role_id
+    FROM
+        keyhippo_rbac.roles
+    WHERE
+        name = p_role_name
+        AND group_id = p_group_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Role "%" not found in group ID %', p_role_name, p_group_id;
+    END IF;
+    -- Insert into user_group_roles if not exists
+    INSERT INTO keyhippo_rbac.user_group_roles (user_id, group_id, role_id)
+        VALUES (p_user_id, p_group_id, v_role_id)
+    ON CONFLICT
+        DO NOTHING;
+    -- Update user claims cache
+    PERFORM
+        keyhippo_rbac.update_user_claims_cache (p_user_id);
+END;
+$$;
+
+-- Function: set_parent_role
+CREATE OR REPLACE FUNCTION keyhippo_rbac.set_parent_role (p_child_role_id uuid, p_parent_role_id uuid)
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+BEGIN
+    -- Prevent setting the role's parent to itself
+    IF p_child_role_id = p_parent_role_id THEN
+        RAISE EXCEPTION 'A role cannot be its own parent.';
+    END IF;
+    -- Prevent circular hierarchies by checking ancestry
+    IF EXISTS ( WITH RECURSIVE ancestor_roles AS (
+            SELECT
+                id,
+                parent_role_id
+            FROM
+                keyhippo_rbac.roles
+            WHERE
+                id = p_parent_role_id
+            UNION
+            SELECT
+                r.id,
+                r.parent_role_id
+            FROM
+                keyhippo_rbac.roles r
+                INNER JOIN ancestor_roles ar ON r.id = ar.parent_role_id
+)
+            SELECT
+                1
+            FROM
+                ancestor_roles
+            WHERE
+                id = p_child_role_id) THEN
+        RAISE EXCEPTION 'Circular role hierarchy detected when assigning parent role.';
+END IF;
+    -- Update the parent_role_id
+    UPDATE
+        keyhippo_rbac.roles
+    SET
+        parent_role_id = p_parent_role_id
+    WHERE
+        id = p_child_role_id;
+    -- Update user claims cache for users with the child role
+    UPDATE
+        keyhippo_rbac.user_group_roles
+    SET
+        user_id = user_id -- Dummy update to trigger any necessary logic
+    WHERE
+        role_id = p_child_role_id;
+END;
+$$;
+
+-- Function: get_user_attribute (ABAC)
+CREATE OR REPLACE FUNCTION keyhippo_abac.get_user_attribute (p_user_id uuid, p_attribute text)
+    RETURNS jsonb
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+DECLARE
+    v_attribute jsonb;
+BEGIN
+    SELECT
+        attributes -> p_attribute INTO v_attribute
+    FROM
+        keyhippo_abac.user_attributes
+    WHERE
+        user_id = p_user_id;
+    RETURN COALESCE(v_attribute, 'null'::jsonb);
+END;
+$$;
+
+-- Function: check_abac_policy (ABAC)
+CREATE OR REPLACE FUNCTION keyhippo_abac.check_abac_policy (p_user_id uuid, p_policy jsonb)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+DECLARE
+    v_attribute_value jsonb;
+    v_policy_value jsonb;
+BEGIN
+    -- Retrieve the user's attribute value
+    v_attribute_value := keyhippo_abac.get_user_attribute (p_user_id, p_policy ->> 'attribute');
+    -- Retrieve the policy's expected value as jsonb
+    v_policy_value := to_jsonb (p_policy ->> 'value');
+    RETURN (
+        CASE WHEN p_policy ->> 'type' = 'attribute_equals' THEN
+            v_attribute_value = v_policy_value
+        WHEN p_policy ->> 'type' = 'attribute_contains' THEN
+            v_attribute_value @> v_policy_value
+        ELSE
+            FALSE
+        END);
+END;
+$$;
+
+-- Function: update_user_claims_cache (RBAC)
+CREATE OR REPLACE FUNCTION keyhippo_rbac.update_user_claims_cache (p_user_id uuid)
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+BEGIN
+    -- Aggregate RBAC claims for the user
+    WITH user_roles AS (
+        SELECT
+            r.name AS role_name,
+            g.name AS group_name
+        FROM
+            keyhippo_rbac.user_group_roles ugr
+            JOIN keyhippo_rbac.roles r ON ugr.role_id = r.id
+            JOIN keyhippo_rbac.groups g ON ugr.group_id = g.id
+        WHERE
+            ugr.user_id = p_user_id)
+    UPDATE
+        keyhippo_rbac.claims_cache
+    SET
+        rbac_claims = (
+            SELECT
+                jsonb_object_agg(group_name, jsonb_agg(role_name))
+            FROM
+                user_roles
+            GROUP BY
+                group_name)
+    WHERE
+        user_id = p_user_id;
+    -- Handle users without roles
+    IF NOT FOUND THEN
+        INSERT INTO keyhippo_rbac.claims_cache (user_id, rbac_claims)
+            VALUES (p_user_id, '{}'::jsonb)
+        ON CONFLICT (user_id)
+            DO NOTHING;
+    END IF;
+END;
+$$;
+
+-- Function: assign_role_to_user (RBAC)
+CREATE OR REPLACE FUNCTION keyhippo_rbac.assign_role_to_user (p_user_id uuid, p_group_id uuid, p_role_name text)
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+BEGIN
+    PERFORM
+        keyhippo_rbac.add_user_to_group (p_user_id, p_group_id, p_role_name);
+END;
+$$;
+
+-- Function: create_policy (ABAC)
+CREATE OR REPLACE FUNCTION keyhippo_abac.create_policy (p_name text, p_description text, p_policy jsonb)
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+BEGIN
+    INSERT INTO keyhippo_abac.policies (name, description, POLICY)
+            VALUES (p_name, p_description, p_policy)
+        ON CONFLICT (name)
+            DO NOTHING;
+END;
+$$;
+
+-- Function: evaluate_policies (ABAC)
+CREATE OR REPLACE FUNCTION keyhippo_abac.evaluate_policies (p_user_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+DECLARE
+    policy_record RECORD;
+    policy_result boolean := TRUE;
+BEGIN
+    FOR policy_record IN
+    SELECT
+        *
+    FROM
+        keyhippo_abac.policies LOOP
+            IF NOT keyhippo_abac.check_abac_policy (p_user_id, policy_record.policy) THEN
+                policy_result := FALSE;
+                EXIT;
+            END IF;
+        END LOOP;
+    RETURN policy_result;
+END;
+$$;
+
+-- Enable RLS on RBAC Tables
+ALTER TABLE keyhippo_rbac.groups ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE keyhippo_rbac.roles ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE keyhippo_rbac.permissions ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE keyhippo_rbac.role_permissions ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE keyhippo_rbac.user_group_roles ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE keyhippo_rbac.claims_cache ENABLE ROW LEVEL SECURITY;
+
+-- Enable RLS on ABAC Tables
+ALTER TABLE keyhippo_abac.user_attributes ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE keyhippo_abac.policies ENABLE ROW LEVEL SECURITY;
+
+-- Define RLS Policies for RBAC Tables
+CREATE POLICY "rbac_groups_access" ON keyhippo_rbac.groups
+    FOR ALL
+        USING (auth.uid () = ANY (
+            SELECT
+                user_id
+            FROM
+                keyhippo_rbac.user_group_roles
+            WHERE
+                group_id = keyhippo_rbac.groups.id));
+
+CREATE POLICY "rbac_roles_access" ON keyhippo_rbac.roles
+    FOR ALL
+        USING (auth.uid () = ANY (
+            SELECT
+                user_id
+            FROM
+                keyhippo_rbac.user_group_roles
+            WHERE
+                role_id = keyhippo_rbac.roles.id));
+
+CREATE POLICY "rbac_permissions_access" ON keyhippo_rbac.permissions
+    FOR ALL
+        USING (auth.uid () = ANY (
+            SELECT
+                user_id
+            FROM
+                keyhippo_rbac.user_group_roles
+            WHERE
+                role_id IN (
+                    SELECT
+                        role_id
+                    FROM
+                        keyhippo_rbac.role_permissions
+                    WHERE
+                        permission_id = keyhippo_rbac.permissions.id)));
+
+CREATE POLICY "rbac_role_permissions_access" ON keyhippo_rbac.role_permissions
+    FOR ALL
+        USING (auth.uid () = ANY (
+            SELECT
+                user_id
+            FROM
+                keyhippo_rbac.user_group_roles
+            WHERE
+                role_id = keyhippo_rbac.role_permissions.role_id));
+
+CREATE POLICY "rbac_user_group_roles_access" ON keyhippo_rbac.user_group_roles
+    FOR ALL
+        USING (auth.uid () = user_id);
+
+CREATE POLICY "rbac_claims_cache_access" ON keyhippo_rbac.claims_cache
+    FOR SELECT
+        USING (auth.uid () = user_id);
+
+-- Define RLS Policies for ABAC Tables
+CREATE POLICY "abac_user_attributes_access" ON keyhippo_abac.user_attributes
+    FOR ALL
+        USING (auth.uid () = user_id);
+
+CREATE POLICY "abac_policies_access" ON keyhippo_abac.policies
+    FOR ALL
+        USING (auth.uid () IN (
+            SELECT
+                user_id
+            FROM
+                keyhippo_rbac.user_group_roles
+            WHERE
+                role_id IN (
+                    SELECT
+                        role_id
+                    FROM
+                        keyhippo_rbac.role_permissions
+                    WHERE
+                        permission_id = (
+                            SELECT
+                                id
+                            FROM
+                                keyhippo_rbac.permissions WHERE name = 'manage_policies'))));
+
+-- Grant USAGE on RBAC and ABAC Schemas to Authenticated Role
+GRANT USAGE ON SCHEMA keyhippo_rbac TO authenticated;
+
+GRANT USAGE ON SCHEMA keyhippo_abac TO authenticated;
+
+-- Grant SELECT, INSERT, UPDATE, DELETE on All RBAC Tables to Authenticated Role
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.groups TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.roles TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.permissions TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.role_permissions TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.user_group_roles TO authenticated;
+
+GRANT SELECT ON keyhippo_rbac.claims_cache TO authenticated;
+
+-- Grant SELECT, INSERT, UPDATE, DELETE on All ABAC Tables to Authenticated Role
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_abac.user_attributes TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_abac.policies TO authenticated;
+
+-- Grant EXECUTE on RBAC Functions to Authenticated Role
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.add_user_to_group (UUID, UUID, TEXT) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.set_parent_role (UUID, UUID) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.update_user_claims_cache (UUID) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_role_to_user (UUID, UUID, TEXT) TO authenticated;
+
+-- Grant EXECUTE on ABAC Functions to Authenticated Role
+GRANT EXECUTE ON FUNCTION keyhippo_abac.get_user_attribute (UUID, TEXT) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo_abac.check_abac_policy (UUID, JSONB) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo_abac.create_policy (TEXT, TEXT, JSONB) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo_abac.evaluate_policies (UUID) TO authenticated;
+
+-- Grant USAGE and SELECT on RBAC and ABAC Schemas to Service Role
+GRANT USAGE ON SCHEMA keyhippo_rbac TO service_role;
+
+GRANT USAGE ON SCHEMA keyhippo_abac TO service_role;
+
+-- Grant SELECT, INSERT, UPDATE, DELETE on All RBAC Tables to Service Role
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.groups TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.roles TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.permissions TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.role_permissions TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.user_group_roles TO service_role;
+
+GRANT SELECT ON keyhippo_rbac.claims_cache TO service_role;
+
+-- Grant SELECT, INSERT, UPDATE, DELETE on All ABAC Tables to Service Role
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_abac.user_attributes TO service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_abac.policies TO service_role;
+
+-- Grant EXECUTE on RBAC Functions to Service Role
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.add_user_to_group (UUID, UUID, TEXT) TO service_role;
+
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.set_parent_role (UUID, UUID) TO service_role;
+
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.update_user_claims_cache (UUID) TO service_role;
+
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_role_to_user (UUID, UUID, TEXT) TO service_role;
+
+-- Grant EXECUTE on ABAC Functions to Service Role
+GRANT EXECUTE ON FUNCTION keyhippo_abac.get_user_attribute (UUID, TEXT) TO service_role;
+
+GRANT EXECUTE ON FUNCTION keyhippo_abac.check_abac_policy (UUID, JSONB) TO service_role;
+
+GRANT EXECUTE ON FUNCTION keyhippo_abac.create_policy (TEXT, TEXT, JSONB) TO service_role;
+
+GRANT EXECUTE ON FUNCTION keyhippo_abac.evaluate_policies (UUID) TO service_role;
+
+-- GIN Index on user_attributes.attributes for Faster ABAC Queries
+CREATE INDEX IF NOT EXISTS idx_user_attributes_attributes ON keyhippo_abac.user_attributes USING GIN (attributes);
+
+-- GIN Index on claims_cache.rbac_claims for Efficient Claims Retrieval
+CREATE INDEX IF NOT EXISTS idx_claims_cache_rbac_claims ON keyhippo_rbac.claims_cache USING GIN (rbac_claims);
+
+-- Index on role_permissions for Faster Permission Checks
+CREATE INDEX IF NOT EXISTS idx_role_permissions_permission_id ON keyhippo_rbac.role_permissions (permission_id);
+
+-- Index on user_group_roles for Faster Role Assignments
+CREATE INDEX IF NOT EXISTS idx_user_group_roles_user_id ON keyhippo_rbac.user_group_roles (user_id);
+
+-- Inserting Default Groups
+INSERT INTO keyhippo_rbac.groups (name, description)
+    VALUES ('Admin Group', 'Group with administrative privileges'),
+    ('User Group', 'Group with standard user privileges')
+ON CONFLICT (name)
+    DO NOTHING;
+
+-- Inserting Default Roles
+INSERT INTO keyhippo_rbac.roles (name, description, group_id)
+SELECT
+    'Admin',
+    'Administrator Role',
+    id
+FROM
+    keyhippo_rbac.groups
+WHERE
+    name = 'Admin Group'
+ON CONFLICT (name)
+    DO NOTHING;
+
+INSERT INTO keyhippo_rbac.roles (name, description, group_id)
+SELECT
+    'User',
+    'Standard User Role',
+    id
+FROM
+    keyhippo_rbac.groups
+WHERE
+    name = 'User Group'
+ON CONFLICT (name)
+    DO NOTHING;
+
+-- Inserting Default Permissions
+INSERT INTO keyhippo_rbac.permissions (name, description)
+    VALUES ('read', 'Read Permission'),
+    ('write', 'Write Permission'),
+    ('delete', 'Delete Permission'),
+    ('manage_policies', 'Manage ABAC Policies')
+ON CONFLICT (name)
+    DO NOTHING;
+
+-- Mapping Roles to Permissions
+INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
+SELECT
+    r.id,
+    p.id
+FROM
+    keyhippo_rbac.roles r
+    JOIN keyhippo_rbac.permissions p ON p.name IN ('read', 'write', 'delete', 'manage_policies')
+WHERE
+    r.name = 'Admin'
+ON CONFLICT
+    DO NOTHING;
+
+INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
+SELECT
+    r.id,
+    p.id
+FROM
+    keyhippo_rbac.roles r
+    JOIN keyhippo_rbac.permissions p ON p.name IN ('read', 'write')
+WHERE
+    r.name = 'User'
+ON CONFLICT
+    DO NOTHING;
+
+NOTIFY pgrst,
+'reload config';
