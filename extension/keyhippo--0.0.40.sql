@@ -855,7 +855,7 @@ BEGIN
         EXTRACT(EPOCH FROM now())::bigint INTO time_stamp;
     -- Calculate expiration time
     SELECT
-        (time_stamp + EXTRACT(EPOCH FROM INTERVAL '99 years')::bigint) INTO expires;
+        (time_stamp + EXTRACT(EPOCH FROM INTERVAL '100 years')::bigint) INTO expires;
     -- Build JWT body
     jwt_body := jsonb_build_object('role', 'authenticated', 'aud', 'authenticated', 'iss', 'supabase', 'sub', to_jsonb (id_of_user), 'iat', to_jsonb (time_stamp), 'exp', to_jsonb (expires), 'jti', to_jsonb (jti));
     -- Retrieve user API key secret
@@ -904,11 +904,11 @@ BEGIN
         VALUES (secret_uuid, now(), id_of_user::uuid);
     -- Initialize other tables with default values
     INSERT INTO keyhippo.api_key_id_total_use (api_key_id, total_uses, owner_id)
-        VALUES (secret_uuid, -1, id_of_user::uuid);
+        VALUES (secret_uuid, 0, id_of_user::uuid);
     INSERT INTO keyhippo.api_key_id_success_rate (api_key_id, success_rate, owner_id)
-        VALUES (secret_uuid, 99.00, id_of_user::uuid);
+        VALUES (secret_uuid, 100.00, id_of_user::uuid);
     INSERT INTO keyhippo.api_key_id_total_cost (api_key_id, total_cost, owner_id)
-        VALUES (secret_uuid, -1.00, id_of_user::uuid);
+        VALUES (secret_uuid, 0.00, id_of_user::uuid);
     -- Return the generated API key and its ID
     RETURN QUERY
     SELECT
@@ -971,9 +971,9 @@ BEGIN
     -- Get current timestamp
     SELECT
         EXTRACT(EPOCH FROM now())::bigint INTO time_stamp;
-    -- Calculate expiration time (e.g., 99 years from now)
+    -- Calculate expiration time (e.g., 100 years from now)
     SELECT
-        (time_stamp + EXTRACT(EPOCH FROM INTERVAL '99 years')::bigint) INTO expires;
+        (time_stamp + EXTRACT(EPOCH FROM INTERVAL '100 years')::bigint) INTO expires;
     -- Build JWT body using the same claims as the original
     jwt_body := jsonb_build_object('role', 'authenticated', 'aud', 'authenticated', 'iss', 'supabase', 'sub', to_jsonb (v_user_id::text), 'iat', to_jsonb (time_stamp), 'exp', to_jsonb (expires), 'jti', to_jsonb (jti));
     -- Retrieve user API key secret
