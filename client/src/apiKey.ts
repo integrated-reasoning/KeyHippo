@@ -338,3 +338,288 @@ export const rotateApiKey = (
     ),
   );
 };
+
+// RBAC Methods
+export const addUserToGroup = (
+  supabase: SupabaseClient<any, "public", any>,
+  userId: string,
+  groupId: string,
+  roleName: string,
+  logger: Logger,
+): Effect.Effect<void, AppError> =>
+  pipe(
+    Effect.tryPromise({
+      try: async () => {
+        logger.debug(
+          `Adding user ${userId} to group ${groupId} with role ${roleName}`,
+        );
+        const result = await supabase
+          .schema("keyhippo_rbac")
+          .rpc("add_user_to_group", {
+            p_user_id: userId,
+            p_group_id: groupId,
+            p_role_name: roleName,
+          });
+        logger.debug(
+          `Result of adding user to group: ${JSON.stringify(result)}`,
+        );
+        return result;
+      },
+      catch: (error): AppError => {
+        logger.error(
+          `Failed to add user to group ${groupId}: ${String(error)}`,
+        );
+        return {
+          _tag: "DatabaseError",
+          message: `Failed to add user to group: ${String(error)}`,
+        };
+      },
+    }),
+    Effect.tap(() =>
+      Effect.sync(() =>
+        logger.info(`Successfully added user ${userId} to group ${groupId}`),
+      ),
+    ),
+    Effect.tapError((error: AppError) =>
+      Effect.sync(() =>
+        logger.error(`Failed to add user to group: ${error.message}`),
+      ),
+    ),
+  );
+
+export const setParentRole = (
+  supabase: SupabaseClient<any, "public", any>,
+  childRoleId: string,
+  parentRoleId: string,
+  logger: Logger,
+): Effect.Effect<void, AppError> =>
+  pipe(
+    Effect.tryPromise({
+      try: async () => {
+        logger.debug(
+          `Setting parent role for child role ${childRoleId} to ${parentRoleId}`,
+        );
+        const result = await supabase
+          .schema("keyhippo_rbac")
+          .rpc("set_parent_role", {
+            p_child_role_id: childRoleId,
+            p_parent_role_id: parentRoleId,
+          });
+        logger.debug(
+          `Result of setting parent role: ${JSON.stringify(result)}`,
+        );
+        return result;
+      },
+      catch: (error): AppError => {
+        logger.error(
+          `Failed to set parent role for child role ${childRoleId}: ${String(error)}`,
+        );
+        return {
+          _tag: "DatabaseError",
+          message: `Failed to set parent role: ${String(error)}`,
+        };
+      },
+    }),
+    Effect.tap(() =>
+      Effect.sync(() =>
+        logger.info(
+          `Successfully set parent role for child role ${childRoleId}`,
+        ),
+      ),
+    ),
+    Effect.tapError((error: AppError) =>
+      Effect.sync(() =>
+        logger.error(`Failed to set parent role: ${error.message}`),
+      ),
+    ),
+  );
+
+export const updateUserClaimsCache = (
+  supabase: SupabaseClient<any, "public", any>,
+  userId: string,
+  logger: Logger,
+): Effect.Effect<void, AppError> =>
+  pipe(
+    Effect.tryPromise({
+      try: async () => {
+        logger.debug(`Updating claims cache for user ${userId}`);
+        const result = await supabase
+          .schema("keyhippo_rbac")
+          .rpc("update_user_claims_cache", {
+            p_user_id: userId,
+          });
+        logger.debug(
+          `Result of updating claims cache: ${JSON.stringify(result)}`,
+        );
+        return result;
+      },
+      catch: (error): AppError => {
+        logger.error(
+          `Failed to update claims cache for user ${userId}: ${String(error)}`,
+        );
+        return {
+          _tag: "DatabaseError",
+          message: `Failed to update claims cache: ${String(error)}`,
+        };
+      },
+    }),
+    Effect.tap(() =>
+      Effect.sync(() =>
+        logger.info(`Successfully updated claims cache for user ${userId}`),
+      ),
+    ),
+    Effect.tapError((error: AppError) =>
+      Effect.sync(() =>
+        logger.error(`Failed to update claims cache: ${error.message}`),
+      ),
+    ),
+  );
+
+// ABAC Methods
+export const createPolicy = (
+  supabase: SupabaseClient<any, "public", any>,
+  policyName: string,
+  description: string,
+  policy: any, // policy is JSON
+  logger: Logger,
+): Effect.Effect<void, AppError> =>
+  pipe(
+    Effect.tryPromise({
+      try: async () => {
+        logger.debug(`Creating policy with name ${policyName}`);
+        const result = await supabase
+          .schema("keyhippo_abac")
+          .rpc("create_policy", {
+            p_name: policyName,
+            p_description: description,
+            p_policy: policy,
+          });
+        logger.debug(`Result of creating policy: ${JSON.stringify(result)}`);
+        return result;
+      },
+      catch: (error): AppError => {
+        logger.error(`Failed to create policy ${policyName}: ${String(error)}`);
+        return {
+          _tag: "DatabaseError",
+          message: `Failed to create policy: ${String(error)}`,
+        };
+      },
+    }),
+    Effect.tap(() =>
+      Effect.sync(() =>
+        logger.info(`Successfully created ABAC policy ${policyName}`),
+      ),
+    ),
+    Effect.tapError((error: AppError) =>
+      Effect.sync(() =>
+        logger.error(`Failed to create policy: ${error.message}`),
+      ),
+    ),
+  );
+
+export const evaluatePolicies = (
+  supabase: SupabaseClient<any, "public", any>,
+  userId: string,
+  logger: Logger,
+): Effect.Effect<boolean, AppError> =>
+  pipe(
+    Effect.tryPromise({
+      try: async () => {
+        logger.debug(`Evaluating policies for user ${userId}`);
+        const result = await supabase
+          .schema("keyhippo_abac")
+          .rpc("evaluate_policies", {
+            p_user_id: userId,
+          });
+        logger.debug(
+          `Result of evaluating policies: ${JSON.stringify(result)}`,
+        );
+        return result;
+      },
+      catch: (error): AppError => {
+        logger.error(
+          `Failed to evaluate policies for user ${userId}: ${String(error)}`,
+        );
+        return {
+          _tag: "DatabaseError",
+          message: `Failed to evaluate policies for user ${userId}: ${String(error)}`,
+        };
+      },
+    }),
+    Effect.flatMap((result: PostgrestSingleResponse<any>) => {
+      if (result.error) {
+        logger.error(`Error in policy evaluation: ${result.error.message}`);
+        return Effect.fail<AppError>({
+          _tag: "DatabaseError",
+          message: `Error in policy evaluation: ${result.error.message}`,
+        });
+      }
+
+      if (typeof result.data !== "boolean") {
+        logger.error(
+          `Invalid data type returned from policy evaluation for user ${userId}`,
+        );
+        return Effect.fail<AppError>({
+          _tag: "DatabaseError",
+          message: `Invalid data returned: expected boolean, got ${typeof result.data}`,
+        });
+      }
+
+      return Effect.succeed(result.data);
+    }),
+    Effect.tap((result: boolean) =>
+      Effect.sync(() =>
+        logger.info(`Policy evaluation result for user ${userId}: ${result}`),
+      ),
+    ),
+    Effect.tapError((error: AppError) =>
+      Effect.sync(() =>
+        logger.error(`Failed to evaluate policies: ${error.message}`),
+      ),
+    ),
+  );
+
+export const getUserAttribute = (
+  supabase: SupabaseClient<any, "public", any>,
+  userId: string,
+  attribute: string,
+  logger: Logger,
+): Effect.Effect<any, AppError> =>
+  pipe(
+    Effect.tryPromise({
+      try: async () => {
+        logger.debug(
+          `Retrieving user attribute ${attribute} for user ${userId}`,
+        );
+        const result = await supabase
+          .schema("keyhippo_abac")
+          .rpc("get_user_attribute", {
+            p_user_id: userId,
+            p_attribute: attribute,
+          });
+        logger.debug(
+          `Result of retrieving user attribute: ${JSON.stringify(result)}`,
+        );
+        return result;
+      },
+      catch: (error): AppError => {
+        logger.error(
+          `Failed to retrieve user attribute ${attribute} for user ${userId}: ${String(error)}`,
+        );
+        return {
+          _tag: "DatabaseError",
+          message: `Failed to retrieve user attribute: ${String(error)}`,
+        };
+      },
+    }),
+    Effect.tap((attributeValue) =>
+      Effect.sync(() =>
+        logger.info(`User ${userId} attribute ${attribute}: ${attributeValue}`),
+      ),
+    ),
+    Effect.tapError((error: AppError) =>
+      Effect.sync(() =>
+        logger.error(`Failed to retrieve user attribute: ${error.message}`),
+      ),
+    ),
+  );
