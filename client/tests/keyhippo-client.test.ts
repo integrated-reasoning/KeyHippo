@@ -219,7 +219,7 @@ describe("KeyHippo Client Tests", () => {
       Authorization: `Bearer ${keyInfo.apiKey}`,
     });
     await expect(testSetup.keyHippo.authenticate(mockHeaders)).rejects.toThrow(
-      "Authentication failed: Invalid API key",
+      "API key does not correspond to any user.",
     );
   });
 

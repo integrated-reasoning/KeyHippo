@@ -57,7 +57,8 @@ export type AppError =
   | { _tag: "DatabaseError"; message: string }
   | { _tag: "UnauthorizedError"; message: string }
   | { _tag: "ValidationError"; message: string }
-  | { _tag: "NetworkError"; message: string };
+  | { _tag: "NetworkError"; message: string }
+  | { _tag: "AuthenticationError"; message: string };
 
 export type AuthResult = {
   userId: string;
