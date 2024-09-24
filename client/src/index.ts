@@ -684,8 +684,12 @@ export class KeyHippo {
    */
   async getUserAttribute(userId: string, attribute: string): Promise<any> {
     return Effect.runPromise(
-      Effect.catchAll(
+      Effect.map(
         getUserAttributeEffect(this.supabase, userId, attribute, this.logger),
+        (response) => response.data,
+      ),
+    );
+  }
 
   /**
    * Sets a user attribute in the ABAC system.
