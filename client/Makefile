@@ -48,7 +48,8 @@ setup-supabase:
 		pnpx supabase start && \
 		eval $$(pnpx supabase status -o env) && \
 		echo "SUPABASE_URL=$$API_URL" > ../.env.test && \
-		echo "SUPABASE_ANON_KEY=$$ANON_KEY" >> ../.env.test
+		echo "SUPABASE_ANON_KEY=$$ANON_KEY" >> ../.env.test && \
+		echo "SUPABASE_SERVICE_ROLE_KEY=$$SERVICE_ROLE_KEY" >> ../.env.test
 	@echo "CREATE EXTENSION IF NOT EXISTS pgcrypto;" > create_schema.sql
 	@echo "CREATE EXTENSION IF NOT EXISTS pgjwt;" >> create_schema.sql
 	@echo "CREATE SCHEMA IF NOT EXISTS keyhippo;" >> create_schema.sql

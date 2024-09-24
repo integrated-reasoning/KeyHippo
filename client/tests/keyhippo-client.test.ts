@@ -15,6 +15,7 @@ const teardown = async () => {
     for (const keyInfo of keyInfos) {
       await testSetup.keyHippo.revokeApiKey(testSetup.userId, keyInfo.id);
     }
+    // Optionally, clean up RBAC and ABAC entries if created during tests
   } catch (error) {
     console.error("Cleanup failed", error);
   }
@@ -153,25 +154,31 @@ describe("KeyHippo Client Tests", () => {
 
   it("should not rotate an API key owned by another user", async () => {
     // Create another user and API key with a separate Supabase client
-    const supabase = createClient(
+    const otherSupabase = createClient(
       process.env.SUPABASE_URL!,
       process.env.SUPABASE_ANON_KEY!,
     );
-    const { data: newUserData } = await supabase.auth.signInAnonymously();
-    const newUserId = newUserData.user!.id;
-    const newUserKeyHippo = new KeyHippo(supabase, console);
+    const { data: newUserData, error: signInError } =
+      await otherSupabase.auth.signInAnonymously();
+
+    if (signInError || !newUserData.user) {
+      throw new Error(`Error signing in as new user: ${signInError?.message}`);
+    }
+
+    const newUserId = newUserData.user.id;
+    const newUserKeyHippo = new KeyHippo(otherSupabase, console);
     const newUserKeyInfo = await newUserKeyHippo.createApiKey(
       newUserId,
       "Another User's Key",
     );
 
-    // Use the original user's Supabase client
+    // Use the original user's KeyHippo client
     const originalUserKeyHippo = testSetup.keyHippo;
 
     // Attempt to rotate the new user's API key as the original user
     await expect(
       originalUserKeyHippo.rotateApiKey(testSetup.userId, newUserKeyInfo.id),
-    ).rejects.toThrow("Error rotating API key");
+    ).rejects.toThrow("[KeyHippo] Unauthorized: You do not own this API key");
 
     // Clean up
     await newUserKeyHippo.revokeApiKey(newUserId, newUserKeyInfo.id);
@@ -179,8 +186,8 @@ describe("KeyHippo Client Tests", () => {
 
   describe("KeyHippo Client RBAC and ABAC Tests", () => {
     it("should add user to a group with a role (RBAC)", async () => {
-      const groupId = "test-group-id";
-      const roleName = "admin";
+      const groupId = testSetup.adminGroupId;
+      const roleName = "Admin";
 
       // Add user to a group with a role
       await testSetup.keyHippo.addUserToGroup(
@@ -190,48 +197,57 @@ describe("KeyHippo Client Tests", () => {
       );
 
       // Query claims cache directly to verify
-      const claimsCacheResult = await testSetup.supabase
-        .from("keyhippo_rbac.claims_cache")
+      const claimsCacheResult = await testSetup.serviceSupabase
+        .schema("keyhippo_rbac")
+        .from("claims_cache")
         .select("rbac_claims")
-        .eq("user_id", testSetup.userId);
+        .eq("user_id", testSetup.userId)
+        .single();
+
+      console.log("RBAC Claims:", claimsCacheResult.data!.rbac_claims);
 
       expect(claimsCacheResult.data).toBeDefined();
-      expect(claimsCacheResult.data?.[0]?.rbac_claims).toBeDefined();
-      expect(claimsCacheResult.data?.[0]?.rbac_claims[groupId]).toContain(
-        roleName,
-      );
+      expect(claimsCacheResult.data!.rbac_claims).toBeDefined();
+      expect(
+        claimsCacheResult.data!.rbac_claims[testSetup.adminGroupId],
+      ).toContain(roleName);
     });
 
     it("should set parent role in RBAC hierarchy", async () => {
-      const childRoleId = "test-child-role-id";
-      const parentRoleId = "test-parent-role-id";
+      const childRoleId = testSetup.userRoleId;
+      const parentRoleId = testSetup.adminRoleId;
 
       await testSetup.keyHippo.setParentRole(childRoleId, parentRoleId);
 
-      // You can assert by checking if the parent role is assigned correctly in the DB.
-      // For example, you might query Supabase to fetch the child role's parent.
-      const parentRoleResult = await testSetup.supabase
-        .from("keyhippo_rbac.roles")
+      // Instead of checking the returned data, verify the role hierarchy directly
+      const roleHierarchy = await testSetup.serviceSupabase
+        .schema("keyhippo_rbac")
+        .from("roles")
         .select("parent_role_id")
-        .eq("id", childRoleId);
+        .eq("id", childRoleId)
+        .single();
 
-      expect(parentRoleResult.data![0].parent_role_id).toBe(parentRoleId);
+      expect(roleHierarchy.data).toBeDefined();
+      expect(roleHierarchy.data!.parent_role_id).toBe(parentRoleId);
     });
+
     it("should assign a parent role to a child role", async () => {
-      const childRoleId = "child-role-id";
-      const parentRoleId = "parent-role-id";
+      const childRoleId = testSetup.userRoleId; // 'User' role
+      const parentRoleId = testSetup.adminRoleId; // 'Admin' role
 
       // Assign the parent role
       await testSetup.keyHippo.setParentRole(childRoleId, parentRoleId);
 
       // Verify the parent role assignment
-      const parentRoleResult = await testSetup.supabase
-        .from("keyhippo_rbac.roles")
+      const parentRoleResult = await testSetup.serviceSupabase
+        .schema("keyhippo_rbac")
+        .from("roles")
         .select("parent_role_id")
-        .eq("id", childRoleId);
+        .eq("id", childRoleId)
+        .single();
 
       expect(parentRoleResult.data).toBeDefined();
-      expect(parentRoleResult.data?.[0]?.parent_role_id).toBe(parentRoleId);
+      expect(parentRoleResult.data!.parent_role_id).toBe(parentRoleId);
     });
 
     it("should create an ABAC policy", async () => {
@@ -246,46 +262,84 @@ describe("KeyHippo Client Tests", () => {
       await testSetup.keyHippo.createPolicy(policyName, description, policy);
 
       // Verify the policy creation in the database
-      const createdPolicy = await testSetup.supabase
-        .from("keyhippo_abac.policies")
+      const createdPolicy = await testSetup.serviceSupabase
+        .schema("keyhippo_abac")
+        .from("policies")
         .select("*")
-        .eq("name", policyName);
+        .eq("name", policyName)
+        .single();
 
       expect(createdPolicy.data).toBeDefined();
-      expect(createdPolicy.data![0].description).toBe(description);
-      expect(createdPolicy.data![0].policy).toEqual(policy);
+      expect(createdPolicy.data.description).toBe(description);
+      expect(JSON.parse(createdPolicy.data.policy)).toEqual(policy);
     });
+
     it("should create and retrieve a policy (ABAC)", async () => {
-      const policy = { attribute: "department", type: "equals", value: "IT" };
+      const policy = {
+        type: "attribute_equals",
+        attribute: "department",
+        value: "IT",
+      };
       const description = "Test Policy";
 
       // Create the ABAC policy
       await testSetup.keyHippo.createPolicy("Test Policy", description, policy);
 
       // Verify the policy was created
-      const createdPolicy = await testSetup.supabase
-        .from("keyhippo_abac.policies")
+      const createdPolicy = await testSetup.serviceSupabase
+        .schema("keyhippo_abac")
+        .from("policies")
         .select("description, policy")
-        .eq("name", "Test Policy");
+        .eq("name", "Test Policy")
+        .single();
+
+      console.log("Created Policy:", createdPolicy.data!.policy);
 
       expect(createdPolicy.data).toBeDefined();
-      expect(createdPolicy.data?.[0]?.description).toBe(description);
-      expect(createdPolicy.data?.[0]?.policy).toEqual(policy);
+      expect(createdPolicy.data!.description).toBe(description);
+      expect(JSON.parse(createdPolicy.data!.policy)).toEqual(policy);
     });
 
     it("should evaluate ABAC policies for a user", async () => {
       const userId = testSetup.userId;
+      const policy = {
+        type: "attribute_equals",
+        attribute: "department",
+        value: "engineering",
+      };
 
+      // Create the policy
+      await testSetup.keyHippo.createPolicy(
+        "Test Policy",
+        "Test Policy Description",
+        policy,
+      );
+
+      // Set the user's attribute
+      await testSetup.keyHippo.setUserAttribute(
+        userId,
+        "department",
+        "engineering",
+      );
+
+      // Evaluate the policies
       const result = await testSetup.keyHippo.evaluatePolicies(userId);
 
-      expect(result).toBe(true); // Assuming the policies allow access for this test case
+      console.log("Policy evaluation result:", result);
+      expect(result).toBe(true);
     });
 
     it("should retrieve user attributes (ABAC)", async () => {
       const attribute = "department";
       const expectedValue = "engineering";
 
-      // Assuming the user has the attribute set in the system
+      // Ensure the user has the attribute set
+      await testSetup.keyHippo.setUserAttribute(
+        testSetup.userId,
+        attribute,
+        expectedValue,
+      );
+
       const attributeValue = await testSetup.keyHippo.getUserAttribute(
         testSetup.userId,
         attribute,
@@ -306,10 +360,17 @@ describe("KeyHippo Client Tests", () => {
       // Create the policy once
       await testSetup.keyHippo.createPolicy(policyName, description, policy);
 
-      // Try creating the same policy again, expecting an error
-      await expect(
-        testSetup.keyHippo.createPolicy(policyName, description, policy),
-      ).rejects.toThrow("Error creating policy");
+      // Try creating the same policy again, expecting no error due to ON CONFLICT DO NOTHING
+      await testSetup.keyHippo.createPolicy(policyName, description, policy);
+
+      // Verify that only one policy exists
+      const policies = await testSetup.serviceSupabase
+        .schema("keyhippo_abac")
+        .from("policies")
+        .select("*")
+        .eq("name", policyName);
+
+      expect(policies.data?.length).toBe(1);
     });
   });
 });
