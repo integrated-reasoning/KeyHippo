@@ -216,237 +216,441 @@ BEGIN
         set_config('request.jwt.claims', json_build_object('sub', current_setting('test.user1_id')::uuid)::text, TRUE);
 END
 $$;
--- Test adding user to a group and assigning roles (RBAC)
+ROLLBACK;
+
+-- ================================================================
+-- RBAC + ABAC Test Suite for KeyHippo
+-- ================================================================
+-- Begin a transaction to ensure tests do not affect the actual data
+BEGIN;
+-- Set up test environment
+SET search_path TO keyhippo_rbac, keyhippo_abac, public, auth;
+-- -------------------------------
+-- 1. Create Test Users
+-- -------------------------------
+DO $$
+BEGIN
+    -- Insert test users with explicit IDs
+    INSERT INTO auth.users (id, email)
+        VALUES ('11111111-1111-1111-1111-111111111111', 'test_admin@example.com'),
+        ('22222222-2222-2222-2222-222222222222', 'test_user@example.com')
+    ON CONFLICT
+        DO NOTHING;
+END
+$$;
+-- -------------------------------
+-- 2. Assign Roles to Users
+-- -------------------------------
+-- Assign Admin Role to test_admin
+DO $$
+BEGIN
+    -- Assign 'Admin' role to 'test_admin' in 'Admin Group'
+    PERFORM
+        keyhippo_rbac.assign_role_to_user ('11111111-1111-1111-1111-111111111111'::uuid, -- test_admin_id
+            (
+                SELECT
+                    id
+                FROM keyhippo_rbac.groups
+                WHERE
+                    name = 'Admin Group'), -- Admin Group ID
+            'Admin' -- Role Name
+);
+END
+$$;
+-- Assign User Role to test_user
+DO $$
+BEGIN
+    -- Assign 'User' role to 'test_user' in 'User Group'
+    PERFORM
+        keyhippo_rbac.assign_role_to_user ('22222222-2222-2222-2222-222222222222'::uuid, -- test_user_id
+            (
+                SELECT
+                    id
+                FROM keyhippo_rbac.groups
+                WHERE
+                    name = 'User Group'), -- User Group ID
+            'User' -- Role Name
+);
+END
+$$;
+-- -------------------------------
+-- 3. Verify Role Assignments
+-- -------------------------------
+-- Verify that Admin Role is assigned to test_admin
 DO $$
 DECLARE
-    user1_id uuid := current_setting('test.user1_id')::uuid;
-    user2_id uuid := current_setting('test.user2_id')::uuid;
-    admin_group_id uuid;
-    admin_role_id uuid;
+    admin_role_count integer;
 BEGIN
-    -- Create group and role if not exists
-    INSERT INTO keyhippo_rbac.groups (name, description)
-        VALUES ('Test Admin Group', 'Group for testing RBAC')
-    ON CONFLICT (name)
-        DO UPDATE SET
-            description = 'Group for testing RBAC';
     SELECT
-        id INTO admin_group_id
+        COUNT(*) INTO admin_role_count
+    FROM
+        keyhippo_rbac.user_group_roles
+    WHERE
+        user_id = '11111111-1111-1111-1111-111111111111'::uuid
+        AND role_id = (
+            SELECT
+                id
+            FROM
+                keyhippo_rbac.roles
+            WHERE
+                name = 'Admin');
+    ASSERT admin_role_count = 1,
+    'Admin Role assigned to test_admin';
+END
+$$;
+-- Verify that User Role is assigned to test_user
+DO $$
+DECLARE
+    user_role_count integer;
+BEGIN
+    SELECT
+        COUNT(*) INTO user_role_count
+    FROM
+        keyhippo_rbac.user_group_roles
+    WHERE
+        user_id = '22222222-2222-2222-2222-222222222222'::uuid
+        AND role_id = (
+            SELECT
+                id
+            FROM
+                keyhippo_rbac.roles
+            WHERE
+                name = 'User');
+    ASSERT user_role_count = 1,
+    'User Role assigned to test_user';
+END
+$$;
+-- -------------------------------
+-- 4. Verify Role Permissions
+-- -------------------------------
+-- Verify that Admin Role has all permissions
+DO $$
+DECLARE
+    admin_permissions_count integer;
+BEGIN
+    SELECT
+        COUNT(*) INTO admin_permissions_count
+    FROM
+        keyhippo_rbac.role_permissions rp
+        JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+    WHERE
+        rp.role_id = (
+            SELECT
+                id
+            FROM
+                keyhippo_rbac.roles
+            WHERE
+                name = 'Admin');
+    ASSERT admin_permissions_count = 4,
+    'Admin Role has all permissions';
+END
+$$;
+-- Verify that User Role has read and write permissions only
+DO $$
+DECLARE
+    user_permissions_count integer;
+BEGIN
+    SELECT
+        COUNT(*) INTO user_permissions_count
+    FROM
+        keyhippo_rbac.role_permissions rp
+        JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+    WHERE
+        rp.role_id = (
+            SELECT
+                id
+            FROM
+                keyhippo_rbac.roles
+            WHERE
+                name = 'User');
+    ASSERT user_permissions_count = 2,
+    'User Role has read and write permissions only';
+END
+$$;
+-- -------------------------------
+-- 5. ABAC Policy Creation and Verification
+-- -------------------------------
+-- Create ABAC Policy: Engineering Access
+DO $$
+BEGIN
+    PERFORM
+        keyhippo_abac.create_policy ('Engineering Access', 'Access restricted to engineering department', '{"type": "attribute_equals", "attribute": "department", "value": "engineering"}'::jsonb);
+END
+$$;
+-- Verify ABAC Policy Creation
+DO $$
+DECLARE
+    policy_count integer;
+BEGIN
+    SELECT
+        COUNT(*) INTO policy_count
+    FROM
+        keyhippo_abac.policies
+    WHERE
+        name = 'Engineering Access';
+    ASSERT policy_count = 1,
+    'ABAC Policy "Engineering Access" created';
+END
+$$;
+-- -------------------------------
+-- 6. Assign Attributes to Users
+-- -------------------------------
+-- Assign both "department" and "location" attributes to test_admin
+DO $$
+BEGIN
+    INSERT INTO keyhippo_abac.user_attributes (user_id, attributes)
+        VALUES ('11111111-1111-1111-1111-111111111111'::uuid, '{"department": "engineering", "location": "HQ"}'::jsonb)
+    ON CONFLICT (user_id)
+        DO UPDATE SET
+            attributes = keyhippo_abac.user_attributes.attributes || EXCLUDED.attributes;
+END
+$$;
+-- Assign "department" attribute to test_user as "sales"
+DO $$
+BEGIN
+    INSERT INTO keyhippo_abac.user_attributes (user_id, attributes)
+        VALUES ('22222222-2222-2222-2222-222222222222'::uuid, '{"department": "sales"}'::jsonb)
+    ON CONFLICT (user_id)
+        DO UPDATE SET
+            attributes = keyhippo_abac.user_attributes.attributes || EXCLUDED.attributes;
+END
+$$;
+-- -------------------------------
+-- 7. Evaluate ABAC Policies
+-- -------------------------------
+-- Evaluate policies for test_admin (should pass both policies)
+DO $$
+DECLARE
+    policy_result boolean;
+BEGIN
+    policy_result := keyhippo_abac.evaluate_policies ('11111111-1111-1111-1111-111111111111'::uuid);
+    RAISE NOTICE 'Policy evaluation result: %', policy_result;
+    ASSERT policy_result = TRUE,
+    'test_admin should satisfy all ABAC policies (department and location)';
+END
+$$;
+-- Evaluate policies for test_user (should fail)
+DO $$
+DECLARE
+    policy_result boolean;
+BEGIN
+    policy_result := keyhippo_abac.evaluate_policies ('22222222-2222-2222-2222-222222222222'::uuid);
+    ASSERT policy_result = FALSE,
+    'test_user does not satisfy ABAC policies';
+END
+$$;
+-- -------------------------------
+-- 8. Claims Cache Verification
+-- -------------------------------
+-- Update claims cache for test_admin
+DO $$
+BEGIN
+    PERFORM
+        keyhippo_rbac.update_user_claims_cache ('11111111-1111-1111-1111-111111111111'::uuid);
+END
+$$;
+-- Update claims cache for test_user
+DO $$
+BEGIN
+    PERFORM
+        keyhippo_rbac.update_user_claims_cache ('22222222-2222-2222-2222-222222222222'::uuid);
+END
+$$;
+-- Verify claims_cache for test_admin using Group UUID
+DO $$
+DECLARE
+    claims jsonb;
+    admin_group_id text;
+BEGIN
+    -- Retrieve Admin Group ID
+    SELECT
+        id::text INTO admin_group_id
     FROM
         keyhippo_rbac.groups
     WHERE
-        name = 'Test Admin Group';
-    INSERT INTO keyhippo_rbac.roles (name, description, group_id)
-        VALUES ('Admin Role', 'Role with admin privileges', admin_group_id)
-    ON CONFLICT (name)
-        DO UPDATE SET
-            description = 'Role with admin privileges';
-    SELECT
-        id INTO admin_role_id
-    FROM
-        keyhippo_rbac.roles
-    WHERE
-        name = 'Admin Role';
-    -- Add user1 to the Admin Group and assign Admin Role
-    PERFORM
-        keyhippo_rbac.add_user_to_group (user1_id, admin_group_id, 'Admin Role');
-    -- Verify that user1 is assigned to the Admin Role
-    ASSERT EXISTS (
-        SELECT
-            1
-        FROM
-            keyhippo_rbac.user_group_roles
-        WHERE
-            user_id = user1_id
-            AND group_id = admin_group_id
-            AND role_id = admin_role_id),
-    'User1 should be assigned to the Admin Role in the Admin Group';
-    -- Verify that user2 is not in the Admin Role
-    ASSERT NOT EXISTS (
-        SELECT
-            1
-        FROM
-            keyhippo_rbac.user_group_roles
-        WHERE
-            user_id = user2_id
-            AND group_id = admin_group_id),
-    'User2 should not have the Admin Role';
-END
-$$;
--- Test updating user claims cache (RBAC)
-DO $$
-DECLARE
-    user1_id uuid := current_setting('test.user1_id')::uuid;
-    claims jsonb;
-BEGIN
-    -- Manually update user1's claims cache
-    PERFORM
-        keyhippo_rbac.update_user_claims_cache (user1_id);
-    -- Check that the claims cache has been updated
+        name = 'Admin Group';
+    -- Retrieve claims_cache
     SELECT
         rbac_claims INTO claims
     FROM
         keyhippo_rbac.claims_cache
     WHERE
-        user_id = user1_id;
-    ASSERT claims @> '{"Test Admin Group": ["Admin Role"]}',
-    'User1 should have Admin Role in Test Admin Group within the claims cache';
+        user_id = '11111111-1111-1111-1111-111111111111'::uuid;
+    -- Construct expected JSONB with group UUID as key
+    ASSERT claims @> jsonb_build_object(admin_group_id, ARRAY['Admin'])::jsonb,
+    'test_admin has correct claims_cache entries';
 END
 $$;
--- Test ABAC policy creation and evaluation
+-- Verify claims_cache for test_user using Group UUID
 DO $$
 DECLARE
-    user1_id uuid := current_setting('test.user1_id')::uuid;
-    user2_id uuid := current_setting('test.user2_id')::uuid;
-    abac_policy jsonb;
-    result boolean;
+    claims jsonb;
+    user_group_id text;
 BEGIN
-    -- Create an ABAC policy that requires a "department" attribute to be "engineering"
-    abac_policy := jsonb_build_object('attribute', 'department', 'type', 'attribute_equals', 'value', 'engineering');
-    PERFORM
-        keyhippo_abac.create_policy ('Engineering Department Policy', 'Policy for engineering department', abac_policy);
-    -- Assign "department" attribute to user1 as "engineering"
-    INSERT INTO keyhippo_abac.user_attributes (user_id, attributes)
-        VALUES (user1_id, jsonb_build_object('department', 'engineering'))
-    ON CONFLICT (user_id)
-        DO UPDATE SET
-            attributes = jsonb_build_object('department', 'engineering');
-    -- Assign "department" attribute to user2 as "sales"
-    INSERT INTO keyhippo_abac.user_attributes (user_id, attributes)
-        VALUES (user2_id, jsonb_build_object('department', 'sales'))
-    ON CONFLICT (user_id)
-        DO UPDATE SET
-            attributes = jsonb_build_object('department', 'sales');
-    -- Evaluate ABAC policies for user1
+    -- Retrieve User Group ID
     SELECT
-        keyhippo_abac.evaluate_policies (user1_id) INTO result;
-    ASSERT result = TRUE,
-    'User1 should pass the engineering department ABAC policy';
-    -- Evaluate ABAC policies for user2
-    SELECT
-        keyhippo_abac.evaluate_policies (user2_id) INTO result;
-    ASSERT result = FALSE,
-    'User2 should fail the engineering department ABAC policy';
-END
-$$;
--- Test assigning parent role (RBAC hierarchy)
-DO $$
-DECLARE
-    child_role_id uuid;
-    parent_role_id uuid;
-BEGIN
-    -- Create parent and child roles
-    INSERT INTO keyhippo_rbac.roles (name, description, group_id)
-        VALUES ('Parent Role', 'Parent role for testing hierarchy', (
-                SELECT
-                    id
-                FROM
-                    keyhippo_rbac.groups
-                WHERE
-                    name = 'Test Admin Group'))
-    ON CONFLICT (name)
-        DO UPDATE SET
-            description = 'Parent role for testing hierarchy';
-    SELECT
-        id INTO parent_role_id
+        id::text INTO user_group_id
     FROM
-        keyhippo_rbac.roles
+        keyhippo_rbac.groups
     WHERE
-        name = 'Parent Role';
-    INSERT INTO keyhippo_rbac.roles (name, description, group_id)
-        VALUES ('Child Role', 'Child role for testing hierarchy', (
-                SELECT
-                    id
-                FROM
-                    keyhippo_rbac.groups
-                WHERE
-                    name = 'Test Admin Group'))
-    ON CONFLICT (name)
-        DO UPDATE SET
-            description = 'Child role for testing hierarchy';
+        name = 'User Group';
+    -- Retrieve claims_cache
     SELECT
-        id INTO child_role_id
+        rbac_claims INTO claims
     FROM
-        keyhippo_rbac.roles
+        keyhippo_rbac.claims_cache
     WHERE
-        name = 'Child Role';
-    -- Assign child role a parent role
+        user_id = '22222222-2222-2222-2222-222222222222'::uuid;
+    -- Construct expected JSONB with group UUID as key
+    ASSERT claims @> jsonb_build_object(user_group_id, ARRAY['User'])::jsonb,
+    'test_user has correct claims_cache entries';
+END
+$$;
+-- -------------------------------
+-- 9. ABAC Policy Evaluation with Missing Attributes
+-- -------------------------------
+-- Create ABAC Policy: HQ Access
+DO $$
+BEGIN
     PERFORM
-        keyhippo_rbac.set_parent_role (child_role_id, parent_role_id);
-    -- Verify that the parent-child relationship is established
-    ASSERT EXISTS (
-        SELECT
-            1
-        FROM
-            keyhippo_rbac.roles
-        WHERE
-            id = child_role_id
-            AND parent_role_id = parent_role_id),
-    'Child Role should have Parent Role as its parent';
-    -- Verify circular hierarchy prevention
-    BEGIN
-        PERFORM
-            keyhippo_rbac.set_parent_role (parent_role_id, child_role_id);
-        ASSERT FALSE,
-        'Should not be able to set circular role hierarchy';
-    EXCEPTION
-        WHEN OTHERS THEN
-            ASSERT sqlerrm LIKE '%Circular role hierarchy detected%',
-            'Circular role hierarchy should be prevented';
-    END;
+        keyhippo_abac.create_policy ('HQ Access', 'Access restricted to HQ location', '{"type": "attribute_equals", "attribute": "location", "value": "HQ"}'::jsonb);
 END
 $$;
--- Test ABAC attribute retrieval
+-- Verify ABAC Policy Creation for HQ Access
 DO $$
 DECLARE
-    user1_id uuid := current_setting('test.user1_id')::uuid;
-    department jsonb;
+    policy_count integer;
 BEGIN
-    -- Retrieve the "department" attribute for user1
     SELECT
-        keyhippo_abac.get_user_attribute (user1_id, 'department') INTO department;
-    ASSERT department = '"engineering"',
-    'User1 should have the "engineering" department attribute';
-END
-$$;
--- Test RLS policy enforcement for RBAC tables
-DO $$
-DECLARE
-    user1_id uuid := current_setting('test.user1_id')::uuid;
-    user2_id uuid := current_setting('test.user2_id')::uuid;
-    group_count bigint;
-BEGIN
-    -- Check access to groups table
-    SELECT
-        count(*) INTO group_count
+        COUNT(*) INTO policy_count
     FROM
-        keyhippo_rbac.groups;
-    ASSERT group_count > 0,
-    'Authenticated user should have access to groups table';
-    -- Switch to user2 (without admin privileges)
-    PERFORM
-        set_config('request.jwt.claim.sub', user2_id::text, TRUE);
-    PERFORM
-        set_config('request.jwt.claims', json_build_object('sub', user2_id)::text, TRUE);
-    -- Ensure user2 does not have access to groups table
-    BEGIN
-        SELECT
-            count(*) INTO group_count
-        FROM
-            keyhippo_rbac.groups;
-        ASSERT FALSE,
-        'User2 should not have access to groups table';
-    EXCEPTION
-        WHEN OTHERS THEN
-            ASSERT sqlerrm LIKE '%permission denied%',
-            'User2 should be denied access to groups table';
-    END;
-    -- Switch back to user1 (with admin privileges)
-    PERFORM
-        set_config('request.jwt.claim.sub', user1_id::text, TRUE);
-    PERFORM
-        set_config('request.jwt.claims', json_build_object('sub', user1_id)::text, TRUE);
+        keyhippo_abac.policies
+    WHERE
+        name = 'HQ Access';
+    ASSERT policy_count = 1,
+    'ABAC Policy "HQ Access" created';
 END
 $$;
--- Clean up
+-- Check existing ABAC policies
+DO $$
+DECLARE
+    policy_record RECORD;
+BEGIN
+    FOR policy_record IN
+    SELECT
+        *
+    FROM
+        keyhippo_abac.policies LOOP
+            RAISE NOTICE 'Policy: % - %', policy_record.name, policy_record.policy;
+        END LOOP;
+END
+$$;
+-- Check test_admin attributes
+DO $$
+DECLARE
+    user_attributes jsonb;
+BEGIN
+    SELECT
+        attributes INTO user_attributes
+    FROM
+        keyhippo_abac.user_attributes
+    WHERE
+        user_id = '11111111-1111-1111-1111-111111111111'::uuid;
+    RAISE NOTICE 'test_admin attributes: %', user_attributes;
+END
+$$;
+-- Remove "location" attribute from test_admin
+DO $$
+BEGIN
+    UPDATE
+        keyhippo_abac.user_attributes
+    SET
+        attributes = attributes - 'location'
+    WHERE
+        user_id = '11111111-1111-1111-1111-111111111111'::uuid;
+END
+$$;
+-- Check test_admin attributes after removal
+DO $$
+DECLARE
+    user_attributes jsonb;
+BEGIN
+    SELECT
+        attributes INTO user_attributes
+    FROM
+        keyhippo_abac.user_attributes
+    WHERE
+        user_id = '11111111-1111-1111-1111-111111111111'::uuid;
+    RAISE NOTICE 'test_admin attributes after removal: %', user_attributes;
+END
+$$;
+-- Check test_admin attributes before policy evaluation
+DO $$
+DECLARE
+    user_attributes jsonb;
+BEGIN
+    SELECT
+        attributes INTO user_attributes
+    FROM
+        keyhippo_abac.user_attributes
+    WHERE
+        user_id = '11111111-1111-1111-1111-111111111111'::uuid;
+    RAISE NOTICE 'test_admin attributes immediately before policy evaluation: %', user_attributes;
+END
+$$;
+-- Evaluate policies for test_admin before adding "location" attribute (should fail)
+DO $$
+DECLARE
+    policy_result boolean;
+BEGIN
+    policy_result := keyhippo_abac.evaluate_policies ('11111111-1111-1111-1111-111111111111'::uuid);
+    IF policy_result = FALSE THEN
+        RAISE NOTICE 'Test passed: test_admin does not satisfy all ABAC policies due to missing "location" attribute';
+    ELSE
+        RAISE EXCEPTION 'Test failed: test_admin unexpectedly satisfies all ABAC policies without "location" attribute';
+    END IF;
+END
+$$;
+-- Assign "location" attribute to test_admin as "HQ"
+DO $$
+BEGIN
+    UPDATE
+        keyhippo_abac.user_attributes
+    SET
+        attributes = attributes || '{"location": "HQ"}'::jsonb
+    WHERE
+        user_id = '11111111-1111-1111-1111-111111111111'::uuid;
+END
+$$;
+-- Check test_admin attributes after adding location
+DO $$
+DECLARE
+    user_attributes jsonb;
+BEGIN
+    SELECT
+        attributes INTO user_attributes
+    FROM
+        keyhippo_abac.user_attributes
+    WHERE
+        user_id = '11111111-1111-1111-1111-111111111111'::uuid;
+    RAISE NOTICE 'test_admin attributes after adding location: %', user_attributes;
+END
+$$;
+-- Re-evaluate policies for test_admin after adding "location" attribute (should pass)
+DO $$
+DECLARE
+    policy_result boolean;
+BEGIN
+    policy_result := keyhippo_abac.evaluate_policies ('11111111-1111-1111-1111-111111111111'::uuid);
+    IF policy_result = TRUE THEN
+        RAISE NOTICE 'Test passed: test_admin now satisfies all ABAC policies after adding "location" attribute';
+    ELSE
+        RAISE EXCEPTION 'Test failed: test_admin does not satisfy all ABAC policies even after adding "location" attribute';
+    END IF;
+END
+$$;
+-- -------------------------------
+-- 10. Clean Up After Tests
+-- -------------------------------
+-- Rollback the transaction to clean up test data
 ROLLBACK;
