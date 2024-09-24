@@ -12,6 +12,7 @@ import {
   loadApiKeyInfo as loadApiKeyInfoEffect,
   revokeApiKey as revokeApiKeyEffect,
   rotateApiKey as rotateApiKeyEffect,
+  setUserAttribute as setUserAttributeEffect,
   getAllKeyMetadata as getAllKeyMetadataEffect,
 } from "./apiKey";
 import { authenticate as authenticateEffect } from "./auth";
@@ -685,8 +686,51 @@ export class KeyHippo {
     return Effect.runPromise(
       Effect.catchAll(
         getUserAttributeEffect(this.supabase, userId, attribute, this.logger),
+
+  /**
+   * Sets a user attribute in the ABAC system.
+   *
+   * @param userId - The unique identifier of the user whose attribute is being
+   *                 set.
+   * @param attribute - The name of the attribute to set for the user.
+   * @param value - The value of the attribute to assign.
+   * @returns A Promise resolving when the attribute has been successfully set.
+   *
+   * Attribute setting process:
+   * 1. Calls the 'set_user_attribute' RPC function with the provided userId,
+   *    attribute, and value.
+   * 2. Stores or updates the attribute in the ABAC schema.
+   * 3. Logs the operation for auditing purposes.
+   *
+   * Usage example:
+   * ```typescript
+   * await keyHippo.setUserAttribute('user123', 'department', 'engineering');
+   * console.log('User attribute set successfully');
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized users can modify sensitive attributes.
+   *
+   * Error handling:
+   * - Throws an error if the attribute cannot be set or if there are database
+   *   connectivity issues.
+   */
+  async setUserAttribute(
+    userId: string,
+    attribute: string,
+    value: any,
+  ): Promise<void> {
+    return Effect.runPromise(
+      Effect.catchAll(
+        setUserAttributeEffect(
+          this.supabase,
+          userId,
+          attribute,
+          value,
+          this.logger,
+        ),
         (error: AppError) =>
-          Effect.fail(`Error retrieving user attribute: ${error.message}`),
+          Effect.fail(`Error setting user attribute: ${error.message}`),
       ),
     );
   }

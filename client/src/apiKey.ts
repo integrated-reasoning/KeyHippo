@@ -623,3 +623,45 @@ export const getUserAttribute = (
       ),
     ),
   );
+
+export const setUserAttribute = (
+  supabase: SupabaseClient<any, "public", any>,
+  userId: string,
+  attribute: string,
+  value: any,
+  logger: Logger,
+): Effect.Effect<void, AppError> =>
+  pipe(
+    Effect.tryPromise({
+      try: async () => {
+        logger.debug(`Setting attribute ${attribute} for user ${userId}`);
+        const result = await supabase
+          .schema("keyhippo_abac")
+          .rpc("set_user_attribute", {
+            p_user_id: userId,
+            p_attribute: attribute,
+            p_value: value,
+          });
+        logger.debug(
+          `Result of setting user attribute: ${JSON.stringify(result)}`,
+        );
+        return result;
+      },
+      catch: (error): AppError => ({
+        _tag: "DatabaseError",
+        message: `Failed to set user attribute: ${String(error)}`,
+      }),
+    }),
+    Effect.tap(() =>
+      Effect.sync(() =>
+        logger.info(
+          `Successfully set attribute ${attribute} for user ${userId}`,
+        ),
+      ),
+    ),
+    Effect.tapError((error: AppError) =>
+      Effect.sync(() =>
+        logger.error(`Failed to set user attribute: ${error.message}`),
+      ),
+    ),
+  );
