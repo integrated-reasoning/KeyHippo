@@ -5,7 +5,6 @@ import {
   ApiKeyInfo,
   ApiKeyMetadata,
   CompleteApiKeyInfo,
-  RotateApiKeyResult,
   AppError,
   Logger,
 } from "./types";
@@ -401,35 +400,23 @@ export const setParentRole = (
         );
         const result = await supabase
           .schema("keyhippo_rbac")
-          .rpc("set_parent_role", {
-            p_child_role_id: childRoleId,
-            p_parent_role_id: parentRoleId,
-          });
+          .from("roles")
+          .update({ parent_role_id: parentRoleId })
+          .eq("id", childRoleId);
         logger.debug(
           `Result of setting parent role: ${JSON.stringify(result)}`,
         );
+        if (result.error) throw result.error;
         return result;
       },
-      catch: (error): AppError => {
-        logger.error(
-          `Failed to set parent role for child role ${childRoleId}: ${String(error)}`,
-        );
-        return {
-          _tag: "DatabaseError",
-          message: `Failed to set parent role: ${String(error)}`,
-        };
-      },
+      catch: (error): AppError => ({
+        _tag: "DatabaseError",
+        message: `Failed to set parent role: ${JSON.stringify(error)}`,
+      }),
     }),
     Effect.tap(() =>
       Effect.sync(() =>
-        logger.info(
-          `Successfully set parent role for child role ${childRoleId}`,
-        ),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to set parent role: ${error.message}`),
+        logger.info(`Parent role set for child role ${childRoleId}`),
       ),
     ),
   );
@@ -476,11 +463,12 @@ export const updateUserClaimsCache = (
   );
 
 // ABAC Methods
+
 export const createPolicy = (
   supabase: SupabaseClient<any, "public", any>,
   policyName: string,
   description: string,
-  policy: any, // policy is JSON
+  policy: any,
   logger: Logger,
 ): Effect.Effect<void, AppError> =>
   pipe(
@@ -492,27 +480,20 @@ export const createPolicy = (
           .rpc("create_policy", {
             p_name: policyName,
             p_description: description,
-            p_policy: policy,
+            p_policy: JSON.stringify(policy),
           });
         logger.debug(`Result of creating policy: ${JSON.stringify(result)}`);
+        if (result.error) throw result.error;
         return result;
       },
-      catch: (error): AppError => {
-        logger.error(`Failed to create policy ${policyName}: ${String(error)}`);
-        return {
-          _tag: "DatabaseError",
-          message: `Failed to create policy: ${String(error)}`,
-        };
-      },
+      catch: (error): AppError => ({
+        _tag: "DatabaseError",
+        message: `Failed to create policy: ${JSON.stringify(error)}`,
+      }),
     }),
     Effect.tap(() =>
       Effect.sync(() =>
         logger.info(`Successfully created ABAC policy ${policyName}`),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to create policy: ${error.message}`),
       ),
     ),
   );
@@ -526,6 +507,23 @@ export const evaluatePolicies = (
     Effect.tryPromise({
       try: async () => {
         logger.debug(`Evaluating policies for user ${userId}`);
+
+        // Log the current user attributes
+        const userAttributes = await supabase
+          .schema("keyhippo_abac")
+          .from("user_attributes")
+          .select("attributes")
+          .eq("user_id", userId)
+          .single();
+        logger.debug(`User attributes: ${JSON.stringify(userAttributes.data)}`);
+
+        // Log all policies
+        const policies = await supabase
+          .schema("keyhippo_abac")
+          .from("policies")
+          .select("*");
+        logger.debug(`All policies: ${JSON.stringify(policies.data)}`);
+
         const result = await supabase
           .schema("keyhippo_abac")
           .rpc("evaluate_policies", {
@@ -534,47 +532,17 @@ export const evaluatePolicies = (
         logger.debug(
           `Result of evaluating policies: ${JSON.stringify(result)}`,
         );
-        return result;
+        if (result.error) throw result.error;
+        return result.data as boolean;
       },
-      catch: (error): AppError => {
-        logger.error(
-          `Failed to evaluate policies for user ${userId}: ${String(error)}`,
-        );
-        return {
-          _tag: "DatabaseError",
-          message: `Failed to evaluate policies for user ${userId}: ${String(error)}`,
-        };
-      },
+      catch: (error): AppError => ({
+        _tag: "DatabaseError",
+        message: `Failed to evaluate policies: ${JSON.stringify(error)}`,
+      }),
     }),
-    Effect.flatMap((result: PostgrestSingleResponse<any>) => {
-      if (result.error) {
-        logger.error(`Error in policy evaluation: ${result.error.message}`);
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: `Error in policy evaluation: ${result.error.message}`,
-        });
-      }
-
-      if (typeof result.data !== "boolean") {
-        logger.error(
-          `Invalid data type returned from policy evaluation for user ${userId}`,
-        );
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: `Invalid data returned: expected boolean, got ${typeof result.data}`,
-        });
-      }
-
-      return Effect.succeed(result.data);
-    }),
-    Effect.tap((result: boolean) =>
+    Effect.tap((result) =>
       Effect.sync(() =>
         logger.info(`Policy evaluation result for user ${userId}: ${result}`),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to evaluate policies: ${error.message}`),
       ),
     ),
   );
