@@ -1,19 +1,19 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import { v4 as uuidv4 } from "uuid";
 import {
-  addUserToGroup,
-  createPolicy,
-  evaluatePolicies,
-  getUserAttribute,
-  setParentRole,
-  updateUserClaimsCache,
   createApiKey,
+  getAllKeyMetadata,
   loadApiKeyInfo,
   revokeApiKey,
   rotateApiKey,
+} from "./api-keys";
+import { addUserToGroup, setParentRole, updateUserClaimsCache } from "./rbac";
+import {
+  createPolicy,
+  evaluatePolicies,
+  getUserAttribute,
   setUserAttribute,
-  getAllKeyMetadata,
-} from "./apiKey";
+} from "./abac";
 import { authenticate } from "./auth";
 import {
   Logger,

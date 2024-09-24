@@ -1,9 +1,6 @@
 import { SupabaseClient, createClient } from "@supabase/supabase-js";
 import { AppError, AuthResult, Logger } from "./types";
-import {
-  createUnauthorizedError,
-  createAuthenticationError,
-} from "./errorUtils";
+import { createUnauthorizedError, createAuthenticationError } from "./utils";
 
 /**
  * Extracts the API key from the Authorization header.

@@ -48,8 +48,10 @@ export async function setupTest(): Promise<TestSetup> {
 
   // 6. Define required groups
   const requiredGroups = ["Admin Group", "User Group"];
-  const existingGroupNames = groups.map(group => group.name);
-  const missingGroups = requiredGroups.filter(groupName => !existingGroupNames.includes(groupName));
+  const existingGroupNames = groups.map((group) => group.name);
+  const missingGroups = requiredGroups.filter(
+    (groupName) => !existingGroupNames.includes(groupName),
+  );
 
   // 7. Create missing groups
   for (const groupName of missingGroups) {
@@ -60,18 +62,20 @@ export async function setupTest(): Promise<TestSetup> {
       .select("id, name");
 
     if (insertGroupError) {
-      throw new Error(`Error creating group "${groupName}": ${insertGroupError.message}`);
+      throw new Error(
+        `Error creating group "${groupName}": ${insertGroupError.message}`,
+      );
     }
 
     groups.push(newGroup![0]);
   }
 
   // 8. Assign group IDs
-  const adminGroup = groups.find(group => group.name === 'Admin Group');
-  const userGroup = groups.find(group => group.name === 'User Group');
+  const adminGroup = groups.find((group) => group.name === "Admin Group");
+  const userGroup = groups.find((group) => group.name === "User Group");
 
   if (!adminGroup || !userGroup) {
-    throw new Error('Required groups (Admin Group and User Group) not found');
+    throw new Error("Required groups (Admin Group and User Group) not found");
   }
 
   // 9. Fetch existing roles
@@ -86,8 +90,10 @@ export async function setupTest(): Promise<TestSetup> {
 
   // 10. Define required roles
   const requiredRoles = ["Admin", "User"];
-  const existingRoleNames = roles.map(role => role.name);
-  const missingRoles = requiredRoles.filter(roleName => !existingRoleNames.includes(roleName));
+  const existingRoleNames = roles.map((role) => role.name);
+  const missingRoles = requiredRoles.filter(
+    (roleName) => !existingRoleNames.includes(roleName),
+  );
 
   // 11. Create missing roles
   for (const roleName of missingRoles) {
@@ -98,18 +104,20 @@ export async function setupTest(): Promise<TestSetup> {
       .select("id, name");
 
     if (insertRoleError) {
-      throw new Error(`Error creating role "${roleName}": ${insertRoleError.message}`);
+      throw new Error(
+        `Error creating role "${roleName}": ${insertRoleError.message}`,
+      );
     }
 
     roles.push(newRole![0]);
   }
 
   // 12. Assign role IDs
-  const adminRole = roles.find(role => role.name === 'Admin');
-  const userRole = roles.find(role => role.name === 'User');
+  const adminRole = roles.find((role) => role.name === "Admin");
+  const userRole = roles.find((role) => role.name === "User");
 
   if (!adminRole || !userRole) {
-    throw new Error('Required roles (Admin and User) not found');
+    throw new Error("Required roles (Admin and User) not found");
   }
 
   return {
