@@ -391,32 +391,52 @@ export const setParentRole = (
   childRoleId: string,
   parentRoleId: string,
   logger: Logger,
-): Effect.Effect<void, AppError> =>
+): Effect.Effect<{ parent_role_id: string | null }, AppError> =>
   pipe(
     Effect.tryPromise({
       try: async () => {
         logger.debug(
           `Setting parent role for child role ${childRoleId} to ${parentRoleId}`,
         );
-        const result = await supabase
-          .schema("keyhippo_rbac")
+
+        // Update the parent_role_id
+        const { error } = await supabase
           .from("roles")
           .update({ parent_role_id: parentRoleId })
           .eq("id", childRoleId);
-        logger.debug(
-          `Result of setting parent role: ${JSON.stringify(result)}`,
-        );
-        if (result.error) throw result.error;
-        return result;
+
+        if (error) {
+          throw new Error(`Failed to set parent role: ${error.message}`);
+        }
+
+        // Fetch the updated role to get the new parent_role_id
+        const { data, error: fetchError } = await supabase
+          .from("roles")
+          .select("parent_role_id")
+          .eq("id", childRoleId)
+          .single();
+
+        if (fetchError || !data) {
+          throw new Error(
+            `Failed to fetch updated role: ${
+              fetchError ? fetchError.message : "No data returned"
+            }`,
+          );
+        }
+
+        // Return the updated parent_role_id
+        return { parent_role_id: data.parent_role_id };
       },
       catch: (error): AppError => ({
         _tag: "DatabaseError",
         message: `Failed to set parent role: ${JSON.stringify(error)}`,
       }),
     }),
-    Effect.tap(() =>
+    Effect.tap((result) =>
       Effect.sync(() =>
-        logger.info(`Parent role set for child role ${childRoleId}`),
+        logger.info(
+          `Parent role set for child role ${childRoleId}: ${result.parent_role_id}`,
+        ),
       ),
     ),
   );
