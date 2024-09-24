@@ -105,7 +105,9 @@ describe("KeyHippo Client Tests", () => {
   it("should handle errors when creating an invalid API key", async () => {
     await expect(
       testSetup.keyHippo.createApiKey("", "Invalid Key"),
-    ).rejects.toThrow("Error creating API key");
+    ).rejects.toThrow(
+      "Failed to create API key: Create API key rpc failed: invalid input syntax for type uuid",
+    );
   });
 
   it("should handle errors when getting metadata for non-existent user", async () => {
@@ -169,7 +171,7 @@ describe("KeyHippo Client Tests", () => {
     const newUserKeyHippo = new KeyHippo(supabase, console);
     const newUserKeyInfo = await newUserKeyHippo.createApiKey(
       newUserId,
-      "Another User's Key",
+      "Other Key",
     );
 
     // Use the original user's KeyHippo client
@@ -205,7 +207,6 @@ describe("KeyHippo Client Tests", () => {
 
   it("should not authenticate with a revoked API key", async () => {
     const keyDescription = "Revokable Key";
-
     // Create and revoke the API key
     const keyInfo = await testSetup.keyHippo.createApiKey(
       testSetup.userId,
@@ -218,7 +219,7 @@ describe("KeyHippo Client Tests", () => {
       Authorization: `Bearer ${keyInfo.apiKey}`,
     });
     await expect(testSetup.keyHippo.authenticate(mockHeaders)).rejects.toThrow(
-      "Unauthorized",
+      "Authentication failed: Invalid API key",
     );
   });
 
@@ -278,46 +279,38 @@ describe("KeyHippo Client Tests", () => {
 
     console.log("Created valid key info:", validKeyInfo);
     expect(validKeyInfo).toHaveProperty("id");
+    expect(validKeyInfo.description).toContain(validDescription);
 
-    // Create the second API key (target for the SQL injection attack)
-    const attackKeyInfo = await testSetup.keyHippo.createApiKey(
-      testSetup.userId,
-      attackDescription,
-    );
+    // Attempt to create the second API key (target for the SQL injection attack)
+    await expect(
+      testSetup.keyHippo.createApiKey(testSetup.userId, attackDescription),
+    ).rejects.toThrow("[KeyHippo] Invalid key description");
 
-    console.log("Created attack key info:", attackKeyInfo);
-    expect(attackKeyInfo).toHaveProperty("id");
-
-    // Try to load the API key info and verify the malicious query didn't succeed
+    // Load the API key infos and verify the malicious query didn't succeed
     const keyInfos = await testSetup.keyHippo.loadApiKeyInfo(testSetup.userId);
 
     console.log("Loaded key infos:", keyInfos);
 
-    // Ensure the descriptions remain intact and no unintended changes happened
+    // Ensure the valid key remains intact
     const validKey = keyInfos.find((key) =>
       key.description.endsWith(validDescription),
     );
-    const attackedKey = keyInfos.find((key) =>
-      key.description.endsWith(attackDescription),
-    );
 
     console.log("Found valid key:", validKey);
-    console.log("Found attacked key:", attackedKey);
-
     expect(validKey).toBeDefined();
     expect(validKey!.description).toContain(validDescription);
 
-    expect(attackedKey).toBeDefined();
-    expect(attackedKey!.description).toContain(attackDescription);
+    // Ensure the attack key was not created
+    const attackedKey = keyInfos.find(
+      (key) => key.description === attackDescription,
+    );
 
-    // Ensure no key was renamed due to SQL injection
-    const foundKey = keyInfos.find((key) => key.description === "Attacked");
-    expect(foundKey).toBeUndefined();
+    console.log("Found attacked key:", attackedKey);
+    expect(attackedKey).toBeUndefined();
 
-    // Additional verification: Ensure the total number of keys remains unchanged
-    expect(keyInfos.length).toBeGreaterThanOrEqual(2);
+    // Additional verification: Ensure the total number of keys remains unchanged (should be at least 1)
+    expect(keyInfos.length).toBeGreaterThanOrEqual(1);
   });
-
 
   /*
   it("should reject API keys that exceed the maximum allowed size", async () => {

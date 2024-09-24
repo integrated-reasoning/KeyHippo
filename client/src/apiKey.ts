@@ -1,655 +1,570 @@
-import { Effect, pipe } from "effect";
 import { v4 as uuidv4 } from "uuid";
 import { SupabaseClient, PostgrestSingleResponse } from "@supabase/supabase-js";
 import {
   ApiKeyInfo,
   ApiKeyMetadata,
   CompleteApiKeyInfo,
+  RotateApiKeyResult,
   AppError,
   Logger,
 } from "./types";
 
-export const createApiKey = (
+export const createApiKey = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   keyDescription: string,
   logger: Logger,
-): Effect.Effect<CompleteApiKeyInfo, AppError> => {
+): Promise<CompleteApiKeyInfo> => {
   const uniqueId = uuidv4();
-  const uniqueDescription = `${uniqueId}-${keyDescription}`;
-  return pipe(
-    Effect.tryPromise({
-      try: () =>
-        supabase.schema("keyhippo").rpc("create_api_key", {
-          id_of_user: userId,
-          key_description: uniqueDescription,
-        }),
-      catch: (error): AppError => ({
-        _tag: "DatabaseError",
-        message: `Failed to create API key: ${String(error)}`,
-      }),
-    }),
-    Effect.flatMap(() => loadApiKeyInfo(supabase, userId, logger)),
-    Effect.tap((keyInfos) =>
-      Effect.sync(() =>
-        logger.info(`Loaded key info: ${JSON.stringify(keyInfos)}`),
-      ),
-    ),
-    Effect.flatMap((keyInfos) => {
-      const createdKeyInfo = keyInfos.find(
-        (keyInfo) => keyInfo.description === uniqueDescription,
-      );
-      if (!createdKeyInfo) {
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: "Failed to find the newly created API key",
-        });
-      }
-      return Effect.succeed(createdKeyInfo);
-    }),
-    Effect.flatMap((keyInfo) =>
-      pipe(
-        Effect.tryPromise({
-          try: () =>
-            supabase.schema("keyhippo").rpc("get_api_key", {
-              id_of_user: userId,
-              secret_id: keyInfo.id,
-            }),
-          catch: (error): AppError => ({
-            _tag: "DatabaseError",
-            message: `Failed to retrieve API key: ${String(error)}`,
-          }),
-        }),
-        Effect.map(
-          (response: PostgrestSingleResponse<unknown>): CompleteApiKeyInfo => {
-            if (response.error) {
-              throw new Error(
-                `Failed to retrieve API key: ${response.error.message}`,
-              );
-            }
-            if (typeof response.data !== "string") {
-              throw new Error("Invalid API key format returned");
-            }
-            return {
-              id: keyInfo.id,
-              description: uniqueDescription,
-              apiKey: response.data,
-              status: "success",
-            };
-          },
-        ),
-      ),
-    ),
-    Effect.tap((completeKeyInfo: CompleteApiKeyInfo) =>
-      Effect.sync(() =>
-        logger.info(
-          `New API key created for user: ${userId}, Key ID: ${completeKeyInfo.id}`,
-        ),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to create new API key: ${error.message}`),
-      ),
-    ),
-  );
+  const uniqueDescription = `${uniqueId}-${keyDescription}`; // TODO remove redundancy
+
+  try {
+    const { error } = await supabase.schema("keyhippo").rpc("create_api_key", {
+      id_of_user: userId,
+      key_description: uniqueDescription,
+    });
+
+    if (error) {
+      throw new Error(`Create API key rpc failed: ${error.message}`);
+    }
+
+    const keyInfos = await loadApiKeyInfo(supabase, userId, logger);
+    const createdKeyInfo = findCreatedKeyInfo(keyInfos, uniqueDescription);
+    const apiKey = await getApiKey(supabase, userId, createdKeyInfo.id);
+
+    const completeKeyInfo: CompleteApiKeyInfo = {
+      id: createdKeyInfo.id,
+      description: uniqueDescription,
+      apiKey,
+      status: "success",
+    };
+
+    logger.info(
+      `New API key created for user: ${userId}, Key ID: ${completeKeyInfo.id}`,
+    );
+
+    return completeKeyInfo;
+  } catch (error) {
+    logger.error(`Failed to create new API key: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to create API key: ${getErrorMessage(error)}`,
+    );
+  }
 };
 
-export const loadApiKeyInfo = (
+export const loadApiKeyInfo = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   logger: Logger,
-): Effect.Effect<ApiKeyInfo[], AppError> => {
-  return pipe(
-    Effect.tryPromise({
-      try: () =>
-        supabase
-          .schema("keyhippo")
-          .rpc("load_api_key_info", { id_of_user: userId }),
-      catch: (error): AppError => ({
-        _tag: "DatabaseError",
-        message: `Failed to load API key info: ${String(error)}`,
-      }),
-    }),
-    Effect.tap((result: any) =>
-      Effect.sync(() => {
-        logger.debug(`Raw result from RPC: ${JSON.stringify(result)}`);
-        logger.debug(
-          `Result status: ${result.status}, statusText: ${result.statusText}`,
-        );
-        logger.debug(`Result error: ${JSON.stringify(result.error)}`);
-        logger.debug(`Result data: ${JSON.stringify(result.data)}`);
-      }),
-    ),
-    Effect.flatMap((result: any) => {
-      if (result.error) {
-        logger.error(`Database error: ${result.error.message}`);
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: `Error loading API key info: ${result.error.message}`,
-        });
-      }
-      if (result.data === null) {
-        logger.warn(`No data returned for user: ${userId}`);
-        return Effect.succeed([]);
-      }
-      if (!Array.isArray(result.data)) {
-        logger.error(`Invalid data structure: ${JSON.stringify(result.data)}`);
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: `Invalid data returned when loading API key info: ${JSON.stringify(result)}`,
-        });
-      }
-      try {
-        const apiKeyInfo = result.data.map((item: any) => ({
-          id: item.id,
-          description: item.description,
-        }));
-        return Effect.succeed(apiKeyInfo);
-      } catch (error) {
-        logger.error(`Error parsing API key info: ${String(error)}`);
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: `Failed to parse API key info: ${String(error)}`,
-        });
-      }
-    }),
-    Effect.tap((apiKeyInfo: ApiKeyInfo[]) =>
-      Effect.sync(() =>
-        logger.info(
-          `API key info loaded for user: ${userId}. Count: ${apiKeyInfo.length}`,
-        ),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() => {
-        logger.error(`Failed to load API key info: ${JSON.stringify(error)}`);
-      }),
-    ),
-  );
+): Promise<ApiKeyInfo[]> => {
+  try {
+    const result = await supabase
+      .schema("keyhippo")
+      .rpc("load_api_key_info", { id_of_user: userId });
+
+    logRpcResult(logger, result);
+
+    if (result.error) {
+      throw new Error(`Error loading API key info: ${result.error.message}`);
+    }
+
+    const apiKeyInfo = parseApiKeyInfo(result.data);
+
+    logger.info(
+      `API key info loaded for user: ${userId}. Count: ${apiKeyInfo.length}`,
+    );
+
+    return apiKeyInfo;
+  } catch (error) {
+    logger.error(`Failed to load API key info: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to load API key info: ${getErrorMessage(error)}`,
+    );
+  }
 };
 
-export const revokeApiKey = (
+function findCreatedKeyInfo(
+  keyInfos: ApiKeyInfo[],
+  description: string,
+): ApiKeyInfo {
+  const createdKeyInfo = keyInfos.find(
+    (keyInfo) => keyInfo.description === description,
+  );
+
+  if (!createdKeyInfo) {
+    throw new Error("Failed to find the newly created API key");
+  }
+
+  return createdKeyInfo;
+}
+
+async function getApiKey(
+  supabase: SupabaseClient<any, "public", any>,
+  userId: string,
+  secretId: string,
+): Promise<string> {
+  const response: PostgrestSingleResponse<unknown> = await supabase
+    .schema("keyhippo")
+    .rpc("get_api_key", {
+      id_of_user: userId,
+      secret_id: secretId,
+    });
+
+  if (response.error) {
+    throw new Error(`Failed to retrieve API key: ${response.error.message}`);
+  }
+
+  if (typeof response.data !== "string") {
+    throw new Error("Invalid API key format returned");
+  }
+
+  return response.data;
+}
+
+export const revokeApiKey = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   secretId: string,
   logger: Logger,
-): Effect.Effect<void, AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: () =>
-        supabase.schema("keyhippo").rpc("revoke_api_key", {
-          id_of_user: userId,
-          secret_id: secretId,
-        }),
-      catch: (error): AppError => ({
-        _tag: "DatabaseError",
-        message: `Failed to revoke API key: ${String(error)}`,
-      }),
-    }),
-    Effect.flatMap((result: any) => {
-      if (result.error) {
-        return Effect.fail({
-          _tag: "DatabaseError",
-          message: `Error revoking API key: ${result.error.message}`,
-        } as const);
-      }
-      return Effect.succeed(undefined);
-    }),
-    Effect.tap(() =>
-      Effect.sync(() =>
-        logger.info(
-          `API key revoked for user: ${userId}, Secret ID: ${secretId}`,
-        ),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to revoke API key: ${error.message}`),
-      ),
-    ),
-  );
+): Promise<void> => {
+  try {
+    const { error } = await supabase.schema("keyhippo").rpc("revoke_api_key", {
+      id_of_user: userId,
+      secret_id: secretId,
+    });
 
-export const getAllKeyMetadata = (
+    if (error) {
+      throw new Error(`Error revoking API key: ${error.message}`);
+    }
+
+    logger.info(`API key revoked for user: ${userId}, Secret ID: ${secretId}`);
+  } catch (error) {
+    logger.error(`Failed to revoke API key: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to revoke API key: ${getErrorMessage(error)}`,
+    );
+  }
+};
+
+export const getAllKeyMetadata = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   logger: Logger,
-): Effect.Effect<ApiKeyMetadata[], AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: () => {
-        logger.debug(`Calling get_api_key_metadata RPC for user: ${userId}`);
-        return supabase
-          .schema("keyhippo")
-          .rpc("get_api_key_metadata", { id_of_user: userId });
-      },
-      catch: (error): AppError => {
-        logger.error(`Error in RPC call: ${String(error)}`);
-        return {
-          _tag: "DatabaseError",
-          message: `Failed to get API key metadata: ${String(error)}`,
-        };
-      },
-    }),
-    Effect.tap((result: any) =>
-      Effect.sync(() => logger.debug(`RPC result: ${JSON.stringify(result)}`)),
-    ),
-    Effect.flatMap((result: PostgrestSingleResponse<unknown>) => {
-      if (result.error) {
-        logger.error(`Database error: ${result.error.message}`);
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: `Error getting API key metadata: ${result.error.message}`,
-        });
-      }
-      logger.debug(`Raw data from database: ${JSON.stringify(result.data)}`);
-      if (!Array.isArray(result.data)) {
-        logger.error(`Invalid data structure: ${JSON.stringify(result.data)}`);
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: "Invalid data returned when getting API key metadata",
-        });
-      }
-      const metadata: ApiKeyMetadata[] = result.data.map((item: any) => ({
-        api_key_id: item.api_key_id,
-        name: item.name || "",
-        permission: item.permission || "",
-        last_used: item.last_used,
-        created: item.created,
-        revoked: item.revoked,
-        total_uses: Number(item.total_uses),
-        success_rate: Number(item.success_rate),
-        total_cost: Number(item.total_cost),
-      }));
-      logger.debug(`Processed metadata: ${JSON.stringify(metadata)}`);
-      return Effect.succeed(metadata);
-    }),
-    Effect.tap((metadata: ApiKeyMetadata[]) =>
-      Effect.sync(() =>
-        logger.info(`API key metadata retrieved. Count: ${metadata.length}`),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(
-          `Failed to get API key metadata: ${JSON.stringify(error)}`,
-        ),
-      ),
-    ),
-  );
+): Promise<ApiKeyMetadata[]> => {
+  try {
+    logger.debug(`Calling get_api_key_metadata RPC for user: ${userId}`);
+    const result = await supabase
+      .schema("keyhippo")
+      .rpc("get_api_key_metadata", { id_of_user: userId });
 
-export const rotateApiKey = (
+    logRpcResult(logger, result);
+
+    if (result.error) {
+      throw new Error(
+        `Error getting API key metadata: ${result.error.message}`,
+      );
+    }
+
+    const metadata = parseApiKeyMetadata(result.data);
+
+    logger.info(`API key metadata retrieved. Count: ${metadata.length}`);
+    return metadata;
+  } catch (error) {
+    logger.error(`Failed to get API key metadata: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to get API key metadata: ${getErrorMessage(error)}`,
+    );
+  }
+};
+
+export const rotateApiKey = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   apiKeyId: string,
   logger: Logger,
-): Effect.Effect<CompleteApiKeyInfo, AppError> => {
-  type RotateApiKeyResult = {
-    new_api_key: string;
-    new_api_key_id: string;
-  };
+): Promise<CompleteApiKeyInfo> => {
+  try {
+    const result = await supabase.schema("keyhippo").rpc("rotate_api_key", {
+      p_api_key_id: apiKeyId,
+    });
 
-  return pipe(
-    Effect.tryPromise({
-      try: () =>
-        supabase.schema("keyhippo").rpc("rotate_api_key", {
-          p_api_key_id: apiKeyId,
-        }),
-      catch: (error): AppError => ({
-        _tag: "DatabaseError",
-        message: `Failed to rotate API key: ${String(error)}`,
-      }),
-    }),
-    Effect.flatMap((result: PostgrestSingleResponse<RotateApiKeyResult[]>) => {
-      if (result.error) {
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: `Error rotating API key: ${result.error.message}`,
-        });
-      }
-      if (!Array.isArray(result.data) || result.data.length === 0) {
-        return Effect.fail<AppError>({
-          _tag: "DatabaseError",
-          message: "No data returned after rotating API key",
-        });
-      }
-      const dataItem = result.data[0];
+    if (result.error) {
+      throw new Error(`Error rotating API key: ${result.error.message}`);
+    }
 
-      const completeApiKeyInfo: CompleteApiKeyInfo = {
-        id: dataItem.new_api_key_id,
-        description: "", // You may need to fetch or retain the description
-        apiKey: dataItem.new_api_key,
-        status: "success" as const, // Ensure 'status' is of type '"success" | "failed"'
-      };
-      return Effect.succeed(completeApiKeyInfo);
-    }),
-    Effect.tap((rotatedKeyInfo: CompleteApiKeyInfo) =>
-      Effect.sync(() =>
-        logger.info(
-          `API key rotated for user: ${userId}, New Key ID: ${rotatedKeyInfo.id}`,
-        ),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to rotate API key: ${error.message}`),
-      ),
-    ),
-  );
+    const rotatedKeyInfo = parseRotatedApiKeyInfo(result.data);
+
+    logger.info(
+      `API key rotated for user: ${userId}, New Key ID: ${rotatedKeyInfo.id}`,
+    );
+
+    return rotatedKeyInfo;
+  } catch (error) {
+    logger.error(`Failed to rotate API key: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to rotate API key: ${getErrorMessage(error)}`,
+    );
+  }
 };
 
 // RBAC Methods
-export const addUserToGroup = (
+
+export const addUserToGroup = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   groupId: string,
   roleName: string,
   logger: Logger,
-): Effect.Effect<void, AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: async () => {
-        logger.debug(
-          `Adding user ${userId} to group ${groupId} with role ${roleName}`,
-        );
-        const result = await supabase
-          .schema("keyhippo_rbac")
-          .rpc("add_user_to_group", {
-            p_user_id: userId,
-            p_group_id: groupId,
-            p_role_name: roleName,
-          });
-        logger.debug(
-          `Result of adding user to group: ${JSON.stringify(result)}`,
-        );
-        return result;
-      },
-      catch: (error): AppError => {
-        logger.error(
-          `Failed to add user to group ${groupId}: ${String(error)}`,
-        );
-        return {
-          _tag: "DatabaseError",
-          message: `Failed to add user to group: ${String(error)}`,
-        };
-      },
-    }),
-    Effect.tap(() =>
-      Effect.sync(() =>
-        logger.info(`Successfully added user ${userId} to group ${groupId}`),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to add user to group: ${error.message}`),
-      ),
-    ),
-  );
+): Promise<void> => {
+  try {
+    logger.debug(
+      `Adding user ${userId} to group ${groupId} with role ${roleName}`,
+    );
+    const { error } = await supabase
+      .schema("keyhippo_rbac")
+      .rpc("add_user_to_group", {
+        p_user_id: userId,
+        p_group_id: groupId,
+        p_role_name: roleName,
+      });
 
-export const setParentRole = (
+    if (error) {
+      throw new Error(`Failed to add user to group: ${error.message}`);
+    }
+
+    logger.info(`Successfully added user ${userId} to group ${groupId}`);
+  } catch (error) {
+    logger.error(
+      `Failed to add user to group ${groupId}: ${getErrorMessage(error)}`,
+    );
+    throw createDatabaseError(
+      `Failed to add user to group: ${getErrorMessage(error)}`,
+    );
+  }
+};
+
+export const setParentRole = async (
   supabase: SupabaseClient<any, "public", any>,
   childRoleId: string,
   parentRoleId: string,
   logger: Logger,
-): Effect.Effect<{ parent_role_id: string | null }, AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: async () => {
-        logger.debug(
-          `Setting parent role for child role ${childRoleId} to ${parentRoleId}`,
-        );
+): Promise<{ parent_role_id: string | null }> => {
+  try {
+    logger.debug(
+      `Setting parent role for child role ${childRoleId} to ${parentRoleId}`,
+    );
 
-        // Update the parent_role_id
-        const { error } = await supabase
-          .from("roles")
-          .update({ parent_role_id: parentRoleId })
-          .eq("id", childRoleId);
+    await updateParentRole(supabase, childRoleId, parentRoleId);
+    const updatedRole = await fetchUpdatedRole(supabase, childRoleId);
 
-        if (error) {
-          throw new Error(`Failed to set parent role: ${error.message}`);
-        }
+    logger.info(
+      `Parent role set for child role ${childRoleId}: ${updatedRole.parent_role_id}`,
+    );
 
-        // Fetch the updated role to get the new parent_role_id
-        const { data, error: fetchError } = await supabase
-          .from("roles")
-          .select("parent_role_id")
-          .eq("id", childRoleId)
-          .single();
+    return updatedRole;
+  } catch (error) {
+    logger.error(`Failed to set parent role: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to set parent role: ${getErrorMessage(error)}`,
+    );
+  }
+};
 
-        if (fetchError || !data) {
-          throw new Error(
-            `Failed to fetch updated role: ${
-              fetchError ? fetchError.message : "No data returned"
-            }`,
-          );
-        }
-
-        // Return the updated parent_role_id
-        return { parent_role_id: data.parent_role_id };
-      },
-      catch: (error): AppError => ({
-        _tag: "DatabaseError",
-        message: `Failed to set parent role: ${JSON.stringify(error)}`,
-      }),
-    }),
-    Effect.tap((result) =>
-      Effect.sync(() =>
-        logger.info(
-          `Parent role set for child role ${childRoleId}: ${result.parent_role_id}`,
-        ),
-      ),
-    ),
-  );
-
-export const updateUserClaimsCache = (
+export const updateUserClaimsCache = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   logger: Logger,
-): Effect.Effect<void, AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: async () => {
-        logger.debug(`Updating claims cache for user ${userId}`);
-        const result = await supabase
-          .schema("keyhippo_rbac")
-          .rpc("update_user_claims_cache", {
-            p_user_id: userId,
-          });
-        logger.debug(
-          `Result of updating claims cache: ${JSON.stringify(result)}`,
-        );
-        return result;
-      },
-      catch: (error): AppError => {
-        logger.error(
-          `Failed to update claims cache for user ${userId}: ${String(error)}`,
-        );
-        return {
-          _tag: "DatabaseError",
-          message: `Failed to update claims cache: ${String(error)}`,
-        };
-      },
-    }),
-    Effect.tap(() =>
-      Effect.sync(() =>
-        logger.info(`Successfully updated claims cache for user ${userId}`),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to update claims cache: ${error.message}`),
-      ),
-    ),
-  );
+): Promise<void> => {
+  try {
+    logger.debug(`Updating claims cache for user ${userId}`);
+    const { error } = await supabase
+      .schema("keyhippo_rbac")
+      .rpc("update_user_claims_cache", {
+        p_user_id: userId,
+      });
+
+    if (error) {
+      throw new Error(`Failed to update claims cache: ${error.message}`);
+    }
+
+    logger.info(`Successfully updated claims cache for user ${userId}`);
+  } catch (error) {
+    logger.error(
+      `Failed to update claims cache for user ${userId}: ${getErrorMessage(error)}`,
+    );
+    throw createDatabaseError(
+      `Failed to update claims cache: ${getErrorMessage(error)}`,
+    );
+  }
+};
 
 // ABAC Methods
 
-export const createPolicy = (
+export const createPolicy = async (
   supabase: SupabaseClient<any, "public", any>,
   policyName: string,
   description: string,
   policy: any,
   logger: Logger,
-): Effect.Effect<void, AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: async () => {
-        logger.debug(`Creating policy with name ${policyName}`);
-        const result = await supabase
-          .schema("keyhippo_abac")
-          .rpc("create_policy", {
-            p_name: policyName,
-            p_description: description,
-            p_policy: JSON.stringify(policy),
-          });
-        logger.debug(`Result of creating policy: ${JSON.stringify(result)}`);
-        if (result.error) throw result.error;
-        return result;
-      },
-      catch: (error): AppError => ({
-        _tag: "DatabaseError",
-        message: `Failed to create policy: ${JSON.stringify(error)}`,
-      }),
-    }),
-    Effect.tap(() =>
-      Effect.sync(() =>
-        logger.info(`Successfully created ABAC policy ${policyName}`),
-      ),
-    ),
-  );
+): Promise<void> => {
+  try {
+    logger.debug(`Creating policy with name ${policyName}`);
+    const { error } = await supabase
+      .schema("keyhippo_abac")
+      .rpc("create_policy", {
+        p_name: policyName,
+        p_description: description,
+        p_policy: JSON.stringify(policy),
+      });
 
-export const evaluatePolicies = (
+    if (error) {
+      throw new Error(`Failed to create policy: ${error.message}`);
+    }
+
+    logger.info(`Successfully created ABAC policy ${policyName}`);
+  } catch (error) {
+    logger.error(`Failed to create policy: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to create policy: ${getErrorMessage(error)}`,
+    );
+  }
+};
+
+export const evaluatePolicies = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   logger: Logger,
-): Effect.Effect<boolean, AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: async () => {
-        logger.debug(`Evaluating policies for user ${userId}`);
+): Promise<boolean> => {
+  try {
+    logger.debug(`Evaluating policies for user ${userId}`);
 
-        // Log the current user attributes
-        const userAttributes = await supabase
-          .schema("keyhippo_abac")
-          .from("user_attributes")
-          .select("attributes")
-          .eq("user_id", userId)
-          .single();
-        logger.debug(`User attributes: ${JSON.stringify(userAttributes.data)}`);
+    await logUserAttributes(supabase, userId, logger);
+    await logAllPolicies(supabase, logger);
 
-        // Log all policies
-        const policies = await supabase
-          .schema("keyhippo_abac")
-          .from("policies")
-          .select("*");
-        logger.debug(`All policies: ${JSON.stringify(policies.data)}`);
+    const { data, error } = await supabase
+      .schema("keyhippo_abac")
+      .rpc("evaluate_policies", {
+        p_user_id: userId,
+      });
 
-        const result = await supabase
-          .schema("keyhippo_abac")
-          .rpc("evaluate_policies", {
-            p_user_id: userId,
-          });
-        logger.debug(
-          `Result of evaluating policies: ${JSON.stringify(result)}`,
-        );
-        if (result.error) throw result.error;
-        return result.data as boolean;
-      },
-      catch: (error): AppError => ({
-        _tag: "DatabaseError",
-        message: `Failed to evaluate policies: ${JSON.stringify(error)}`,
-      }),
-    }),
-    Effect.tap((result) =>
-      Effect.sync(() =>
-        logger.info(`Policy evaluation result for user ${userId}: ${result}`),
-      ),
-    ),
-  );
+    if (error) {
+      throw new Error(`Failed to evaluate policies: ${error.message}`);
+    }
 
-export const getUserAttribute = (
+    const result = data as boolean;
+    logger.info(`Policy evaluation result for user ${userId}: ${result}`);
+    return result;
+  } catch (error) {
+    logger.error(`Failed to evaluate policies: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to evaluate policies: ${getErrorMessage(error)}`,
+    );
+  }
+};
+
+export const getUserAttribute = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   attribute: string,
   logger: Logger,
-): Effect.Effect<any, AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: async () => {
-        logger.debug(
-          `Retrieving user attribute ${attribute} for user ${userId}`,
-        );
-        const result = await supabase
-          .schema("keyhippo_abac")
-          .rpc("get_user_attribute", {
-            p_user_id: userId,
-            p_attribute: attribute,
-          });
-        logger.debug(
-          `Result of retrieving user attribute: ${JSON.stringify(result)}`,
-        );
-        return result;
-      },
-      catch: (error): AppError => {
-        logger.error(
-          `Failed to retrieve user attribute ${attribute} for user ${userId}: ${String(error)}`,
-        );
-        return {
-          _tag: "DatabaseError",
-          message: `Failed to retrieve user attribute: ${String(error)}`,
-        };
-      },
-    }),
-    Effect.tap((attributeValue) =>
-      Effect.sync(() =>
-        logger.info(`User ${userId} attribute ${attribute}: ${attributeValue}`),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to retrieve user attribute: ${error.message}`),
-      ),
-    ),
-  );
+): Promise<any> => {
+  try {
+    logger.debug(`Retrieving user attribute ${attribute} for user ${userId}`);
+    const { data, error } = await supabase
+      .schema("keyhippo_abac")
+      .rpc("get_user_attribute", {
+        p_user_id: userId,
+        p_attribute: attribute,
+      });
 
-export const setUserAttribute = (
+    if (error) {
+      throw new Error(`Failed to retrieve user attribute: ${error.message}`);
+    }
+
+    logger.info(
+      `User ${userId} attribute ${attribute}: ${JSON.stringify(data)}`,
+    );
+    return data;
+  } catch (error) {
+    logger.error(
+      `Failed to retrieve user attribute: ${getErrorMessage(error)}`,
+    );
+    throw createDatabaseError(
+      `Failed to retrieve user attribute: ${getErrorMessage(error)}`,
+    );
+  }
+};
+
+export const setUserAttribute = async (
   supabase: SupabaseClient<any, "public", any>,
   userId: string,
   attribute: string,
   value: any,
   logger: Logger,
-): Effect.Effect<void, AppError> =>
-  pipe(
-    Effect.tryPromise({
-      try: async () => {
-        logger.debug(`Setting attribute ${attribute} for user ${userId}`);
-        const result = await supabase
-          .schema("keyhippo_abac")
-          .rpc("set_user_attribute", {
-            p_user_id: userId,
-            p_attribute: attribute,
-            p_value: value,
-          });
-        logger.debug(
-          `Result of setting user attribute: ${JSON.stringify(result)}`,
-        );
-        return result;
-      },
-      catch: (error): AppError => ({
-        _tag: "DatabaseError",
-        message: `Failed to set user attribute: ${String(error)}`,
-      }),
-    }),
-    Effect.tap(() =>
-      Effect.sync(() =>
-        logger.info(
-          `Successfully set attribute ${attribute} for user ${userId}`,
-        ),
-      ),
-    ),
-    Effect.tapError((error: AppError) =>
-      Effect.sync(() =>
-        logger.error(`Failed to set user attribute: ${error.message}`),
-      ),
-    ),
+): Promise<void> => {
+  try {
+    logger.debug(`Setting attribute ${attribute} for user ${userId}`);
+    const { error } = await supabase
+      .schema("keyhippo_abac")
+      .rpc("set_user_attribute", {
+        p_user_id: userId,
+        p_attribute: attribute,
+        p_value: value,
+      });
+
+    if (error) {
+      throw new Error(`Failed to set user attribute: ${error.message}`);
+    }
+
+    logger.info(`Successfully set attribute ${attribute} for user ${userId}`);
+  } catch (error) {
+    logger.error(`Failed to set user attribute: ${getErrorMessage(error)}`);
+    throw createDatabaseError(
+      `Failed to set user attribute: ${getErrorMessage(error)}`,
+    );
+  }
+};
+
+// Helper functions
+
+async function logUserAttributes(
+  supabase: SupabaseClient<any, "public", any>,
+  userId: string,
+  logger: Logger,
+): Promise<void> {
+  const { data: userAttributes, error } = await supabase
+    .schema("keyhippo_abac")
+    .from("user_attributes")
+    .select("attributes")
+    .eq("user_id", userId)
+    .single();
+
+  if (error) {
+    logger.warn(`Failed to fetch user attributes: ${error.message}`);
+  } else {
+    logger.debug(`User attributes: ${JSON.stringify(userAttributes)}`);
+  }
+}
+
+async function logAllPolicies(
+  supabase: SupabaseClient<any, "public", any>,
+  logger: Logger,
+): Promise<void> {
+  const { data: policies, error } = await supabase
+    .schema("keyhippo_abac")
+    .from("policies")
+    .select("*");
+
+  if (error) {
+    logger.warn(`Failed to fetch policies: ${error.message}`);
+  } else {
+    logger.debug(`All policies: ${JSON.stringify(policies)}`);
+  }
+}
+
+async function updateParentRole(
+  supabase: SupabaseClient<any, "public", any>,
+  childRoleId: string,
+  parentRoleId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("roles")
+    .update({ parent_role_id: parentRoleId })
+    .eq("id", childRoleId);
+
+  if (error) {
+    throw new Error(`Failed to update parent role: ${error.message}`);
+  }
+}
+
+async function fetchUpdatedRole(
+  supabase: SupabaseClient<any, "public", any>,
+  childRoleId: string,
+): Promise<{ parent_role_id: string | null }> {
+  const { data, error } = await supabase
+    .from("roles")
+    .select("parent_role_id")
+    .eq("id", childRoleId)
+    .single();
+
+  if (error || !data) {
+    throw new Error(
+      `Failed to fetch updated role: ${
+        error ? error.message : "No data returned"
+      }`,
+    );
+  }
+
+  return { parent_role_id: data.parent_role_id };
+}
+
+function parseApiKeyMetadata(data: unknown): ApiKeyMetadata[] {
+  if (!Array.isArray(data)) {
+    throw new Error("Invalid data returned when getting API key metadata");
+  }
+
+  return data.map((item: any) => ({
+    api_key_id: item.api_key_id,
+    name: item.name || "",
+    permission: item.permission || "",
+    last_used: item.last_used,
+    created: item.created,
+    revoked: item.revoked,
+    total_uses: Number(item.total_uses),
+    success_rate: Number(item.success_rate),
+    total_cost: Number(item.total_cost),
+  }));
+}
+
+function parseRotatedApiKeyInfo(data: unknown): CompleteApiKeyInfo {
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error("No data returned after rotating API key");
+  }
+
+  const dataItem = data[0] as RotateApiKeyResult;
+
+  if (!dataItem.new_api_key || !dataItem.new_api_key_id) {
+    throw new Error("Invalid data structure returned after rotating API key");
+  }
+
+  return {
+    id: dataItem.new_api_key_id,
+    description: dataItem.description || "Rotated API Key",
+    apiKey: dataItem.new_api_key,
+    status: "success" as const,
+  };
+}
+
+function logRpcResult(logger: Logger, result: any): void {
+  logger.debug(`Raw result from RPC: ${JSON.stringify(result)}`);
+  logger.debug(
+    `Result status: ${result.status}, statusText: ${result.statusText}`,
   );
+  logger.debug(`Result error: ${JSON.stringify(result.error)}`);
+  logger.debug(`Result data: ${JSON.stringify(result.data)}`);
+}
+
+function parseApiKeyInfo(data: unknown): ApiKeyInfo[] {
+  if (data === null) {
+    return [];
+  }
+
+  if (!Array.isArray(data)) {
+    throw new Error(
+      `Invalid data returned when loading API key info: ${JSON.stringify(data)}`,
+    );
+  }
+
+  return data.map((item: any) => ({
+    id: item.id,
+    description: item.description,
+  }));
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function createDatabaseError(message: string): AppError {
+  return { _tag: "DatabaseError", message };
+}

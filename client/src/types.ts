@@ -38,6 +38,7 @@ export interface ApiKeyResult {
 export type RotateApiKeyResult = {
   new_api_key: string;
   new_api_key_id: string;
+  description?: string;
 };
 
 export type ApiKeyMetadata = {

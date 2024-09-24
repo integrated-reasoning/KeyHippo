@@ -1,24 +1,22 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Effect } from "effect";
 import { v4 as uuidv4 } from "uuid";
 import {
-  addUserToGroup as addUserToGroupEffect,
-  createPolicy as createPolicyEffect,
-  evaluatePolicies as evaluatePoliciesEffect,
-  getUserAttribute as getUserAttributeEffect,
-  setParentRole as setParentRoleEffect,
-  updateUserClaimsCache as updateUserClaimsCacheEffect,
-  createApiKey as createApiKeyEffect,
-  loadApiKeyInfo as loadApiKeyInfoEffect,
-  revokeApiKey as revokeApiKeyEffect,
-  rotateApiKey as rotateApiKeyEffect,
-  setUserAttribute as setUserAttributeEffect,
-  getAllKeyMetadata as getAllKeyMetadataEffect,
+  addUserToGroup,
+  createPolicy,
+  evaluatePolicies,
+  getUserAttribute,
+  setParentRole,
+  updateUserClaimsCache,
+  createApiKey,
+  loadApiKeyInfo,
+  revokeApiKey,
+  rotateApiKey,
+  setUserAttribute,
+  getAllKeyMetadata,
 } from "./apiKey";
-import { authenticate as authenticateEffect } from "./auth";
+import { authenticate } from "./auth";
 import {
   Logger,
-  AppError,
   ApiKeyInfo,
   CompleteApiKeyInfo,
   ApiKeyMetadata,
@@ -119,20 +117,21 @@ export class KeyHippo {
     userId: string,
     keyDescription: string,
   ): Promise<CompleteApiKeyInfo> {
-    const uniqueId = uuidv4();
-    const uniqueDescription = `${uniqueId}-${keyDescription}`;
-    return Effect.runPromise(
-      Effect.catchAll(
-        createApiKeyEffect(
-          this.supabase,
-          userId,
-          uniqueDescription,
-          this.logger,
-        ),
-        (error: AppError) =>
-          Effect.fail(`Error creating API key: ${error.message}`),
-      ),
-    );
+    const uniqueId = uuidv4(); // TODO: remove this
+    const uniqueDescription = `${uniqueId}-${keyDescription}`; // TODO: remove this
+    try {
+      return await createApiKey(
+        this.supabase,
+        userId,
+        uniqueDescription,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error creating API key: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -169,9 +168,14 @@ export class KeyHippo {
    * actual API key values.
    */
   async loadApiKeyInfo(userId: string): Promise<ApiKeyInfo[]> {
-    return Effect.runPromise(
-      loadApiKeyInfoEffect(this.supabase, userId, this.logger),
-    );
+    try {
+      return await loadApiKeyInfo(this.supabase, userId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error loading API key info: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -213,9 +217,14 @@ export class KeyHippo {
    * attempts to detect and respond to potential security incidents.
    */
   async revokeApiKey(userId: string, secretId: string): Promise<void> {
-    return Effect.runPromise(
-      revokeApiKeyEffect(this.supabase, userId, secretId, this.logger),
-    );
+    try {
+      await revokeApiKey(this.supabase, userId, secretId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error revoking API key: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -262,13 +271,14 @@ export class KeyHippo {
    * purposes.
    */
   async getAllKeyMetadata(userId: string): Promise<ApiKeyMetadata[]> {
-    return Effect.runPromise(
-      Effect.catchAll(
-        getAllKeyMetadataEffect(this.supabase, userId, this.logger),
-        (error: AppError) =>
-          Effect.fail(`Error getting API key metadata: ${error.message}`),
-      ),
-    );
+    try {
+      return await getAllKeyMetadata(this.supabase, userId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error getting API key metadata: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -332,13 +342,14 @@ export class KeyHippo {
     userId: string,
     apiKeyId: string,
   ): Promise<CompleteApiKeyInfo> {
-    return Effect.runPromise(
-      Effect.catchAll(
-        rotateApiKeyEffect(this.supabase, userId, apiKeyId, this.logger),
-        (error: AppError) =>
-          Effect.fail(`Error rotating API key: ${error.message}`),
-      ),
-    );
+    try {
+      return await rotateApiKey(this.supabase, userId, apiKeyId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error rotating API key: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -396,12 +407,15 @@ export class KeyHippo {
    * session-based authentication.
    */
   async authenticate(headers: Headers): Promise<AuthResult> {
-    return Effect.runPromise(
-      authenticateEffect(headers, this.supabase, this.logger),
-    );
+    try {
+      return await authenticate(headers, this.supabase, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Authentication failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
-
-  // RBAC methods
 
   /**
    * Adds a user to a specified group with a given role.
@@ -443,19 +457,20 @@ export class KeyHippo {
     groupId: string,
     roleName: string,
   ): Promise<void> {
-    return Effect.runPromise(
-      Effect.catchAll(
-        addUserToGroupEffect(
-          this.supabase,
-          userId,
-          groupId,
-          roleName,
-          this.logger,
-        ),
-        (error: AppError) =>
-          Effect.fail(`Error adding user to group: ${error.message}`),
-      ),
-    );
+    try {
+      await addUserToGroup(
+        this.supabase,
+        userId,
+        groupId,
+        roleName,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error adding user to group: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -495,19 +510,20 @@ export class KeyHippo {
   async setParentRole(
     childRoleId: string,
     parentRoleId: string,
-  ): Promise<void> {
-    return Effect.runPromise(
-      Effect.catchAll(
-        setParentRoleEffect(
-          this.supabase,
-          childRoleId,
-          parentRoleId,
-          this.logger,
-        ),
-        (error: AppError) =>
-          Effect.fail(`Error setting parent role: ${error.message}`),
-      ),
-    );
+  ): Promise<{ parent_role_id: string | null }> {
+    try {
+      return await setParentRole(
+        this.supabase,
+        childRoleId,
+        parentRoleId,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error setting parent role: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -546,12 +562,15 @@ export class KeyHippo {
    *   connectivity issues.
    */
   async updateUserClaimsCache(userId: string): Promise<void> {
-    return Effect.runPromise(
-      updateUserClaimsCacheEffect(this.supabase, userId, this.logger),
-    );
+    try {
+      await updateUserClaimsCache(this.supabase, userId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error updating user claims cache: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
-
-  // ABAC methods
 
   /**
    * Creates a new ABAC (Attribute-Based Access Control) policy.
@@ -597,19 +616,20 @@ export class KeyHippo {
     description: string,
     policy: any,
   ): Promise<void> {
-    return Effect.runPromise(
-      Effect.catchAll(
-        createPolicyEffect(
-          this.supabase,
-          policyName,
-          description,
-          policy,
-          this.logger,
-        ),
-        (error: AppError) =>
-          Effect.fail(`Error creating policy: ${error.message}`),
-      ),
-    );
+    try {
+      await createPolicy(
+        this.supabase,
+        policyName,
+        description,
+        policy,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error creating policy: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -645,13 +665,14 @@ export class KeyHippo {
    *   invalid policies.
    */
   async evaluatePolicies(userId: string): Promise<boolean> {
-    return Effect.runPromise(
-      Effect.catchAll(
-        evaluatePoliciesEffect(this.supabase, userId, this.logger),
-        (error: AppError) =>
-          Effect.fail(`Error evaluating policies: ${error.message}`),
-      ),
-    );
+    try {
+      return await evaluatePolicies(this.supabase, userId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error evaluating policies: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -670,8 +691,7 @@ export class KeyHippo {
    *
    * Usage example:
    * ```typescript
-   * const department = await keyHippo.getUserAttribute('user123',
-   * 'department');
+   * const department = await keyHippo.getUserAttribute('user123', 'department');
    * console.log(`User department: ${department}`);
    * ```
    *
@@ -683,12 +703,19 @@ export class KeyHippo {
    *   connectivity issues.
    */
   async getUserAttribute(userId: string, attribute: string): Promise<any> {
-    return Effect.runPromise(
-      Effect.map(
-        getUserAttributeEffect(this.supabase, userId, attribute, this.logger),
-        (response) => response.data,
-      ),
-    );
+    try {
+      return await getUserAttribute(
+        this.supabase,
+        userId,
+        attribute,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error getting user attribute: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 
   /**
@@ -724,18 +751,19 @@ export class KeyHippo {
     attribute: string,
     value: any,
   ): Promise<void> {
-    return Effect.runPromise(
-      Effect.catchAll(
-        setUserAttributeEffect(
-          this.supabase,
-          userId,
-          attribute,
-          value,
-          this.logger,
-        ),
-        (error: AppError) =>
-          Effect.fail(`Error setting user attribute: ${error.message}`),
-      ),
-    );
+    try {
+      await setUserAttribute(
+        this.supabase,
+        userId,
+        attribute,
+        value,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error setting user attribute: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
   }
 }
