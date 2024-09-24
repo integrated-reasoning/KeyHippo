@@ -842,6 +842,10 @@ BEGIN
     IF auth.uid () IS NULL OR auth.uid () != id_of_user::uuid THEN
         RAISE EXCEPTION '[KeyHippo] Unauthorized: Invalid user ID';
     END IF;
+    -- Validate key description length and format
+    IF LENGTH(key_description) > 255 OR key_description !~ '^[a-zA-Z0-9_ -]*$' THEN
+        RAISE EXCEPTION '[KeyHippo] Invalid key description';
+    END IF;
     -- Ensure the user exists in the user_ids table
     INSERT INTO keyhippo.user_ids (id)
         VALUES (id_of_user::uuid)
