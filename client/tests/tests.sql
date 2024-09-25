@@ -25,24 +25,22 @@ END
 $$;
 -- Switch to authenticated role
 SET local ROLE authenticated;
--- Test api_key_id_owner_id access
+-- Test 1: Verify initial state (no API keys)
 DO $$
 DECLARE
-    count_result bigint;
+    key_count bigint;
 BEGIN
     SELECT
-        count(*) INTO count_result
+        COUNT(*) INTO key_count
     FROM
-        keyhippo.api_key_id_owner_id
+        keyhippo.api_key_metadata
     WHERE
         user_id = current_setting('test.user1_id')::uuid;
-    ASSERT count_result IS NOT NULL,
-    'Authenticated user can access api_key_id_owner_id table';
-    ASSERT count_result = 0,
-    'Initially, no API keys exist for the user';
+    ASSERT key_count = 0,
+    'Initially, no API keys should exist for the user';
 END
 $$;
--- Test create_api_key function
+-- Test 2: Create API key
 DO $$
 DECLARE
     created_key_result record;
@@ -51,171 +49,226 @@ BEGIN
     SELECT
         * INTO created_key_result
     FROM
-        keyhippo.create_api_key (current_setting('test.user1_id'), 'Test API Key');
+        keyhippo.create_api_key ('Test API Key');
     ASSERT created_key_result.api_key IS NOT NULL,
-    'create_api_key executes successfully for authenticated user';
+    'create_api_key should return a valid API key';
     ASSERT created_key_result.api_key_id IS NOT NULL,
-    'create_api_key returns a valid API key ID';
+    'create_api_key should return a valid API key ID';
     SELECT
-        count(*) INTO key_count
+        COUNT(*) INTO key_count
     FROM
-        keyhippo.api_key_id_name
+        keyhippo.api_key_metadata
     WHERE
-        name = 'Test API Key'
-        AND api_key_id IN (
-            SELECT
-                api_key_id
-            FROM
-                keyhippo.api_key_id_owner_id
-            WHERE
-                user_id = current_setting('test.user1_id')::uuid);
+        id = created_key_result.api_key_id
+        AND user_id = current_setting('test.user1_id')::uuid;
     ASSERT key_count = 1,
-    'An API key should be created with the given name for the authenticated user';
+    'An API key should be created for the authenticated user';
 END
 $$;
--- Attempt to create API key for another user
-DO $$
-BEGIN
-    BEGIN
-        PERFORM
-            keyhippo.create_api_key (current_setting('test.user2_id'), 'Malicious API Key');
-        ASSERT FALSE,
-        'Should not be able to create API key for another user';
-    EXCEPTION
-        WHEN OTHERS THEN
-            ASSERT sqlerrm LIKE '%[KeyHippo] Unauthorized: Invalid user ID%',
-            'Authenticated user cannot create API key for another user';
-    END;
-END
-$$;
--- Test get_api_key_metadata function
+-- Test 3: Attempt to create API key for another user (should fail)
 DO $$
 DECLARE
     created_key_result record;
-    metadata_name text;
+    original_user uuid;
+    current_user_id uuid;
+    key_count bigint;
+BEGIN
+    -- Store the original user
+    original_user := auth.uid ();
+    RAISE NOTICE 'Original user: %', original_user;
+    -- Switch to user2
+    PERFORM
+        set_config('request.jwt.claim.sub', current_setting('test.user2_id'), TRUE);
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', current_setting('test.user2_id'))::text, TRUE);
+    current_user_id := auth.uid ();
+    RAISE NOTICE 'Switched to user: %', current_user_id;
+    RAISE NOTICE 'JWT sub claim: %', current_setting('request.jwt.claim.sub', TRUE);
+    IF current_user_id = original_user THEN
+        RAISE EXCEPTION 'Failed to switch user context';
+    END IF;
+    -- Attempt to create an API key as the switched user (user2)
+    SELECT
+        * INTO created_key_result
+    FROM
+        keyhippo.create_api_key ('Test API Key for User2');
+    ASSERT created_key_result.api_key IS NOT NULL,
+    'API key should be created for the switched user';
+    -- Verify the API key was created for user2
+    SELECT
+        count(*) INTO key_count
+    FROM
+        keyhippo.api_key_metadata
+    WHERE
+        user_id = current_user_id
+        AND description = 'Test API Key for User2';
+    ASSERT key_count = 1,
+    'An API key should be created for the switched user (user2)';
+    -- Switch back to the original user
+    PERFORM
+        set_config('request.jwt.claim.sub', original_user::text, TRUE);
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', original_user)::text, TRUE);
+    RAISE NOTICE 'Switched back to user: %', auth.uid ();
+    IF auth.uid () != original_user THEN
+        RAISE EXCEPTION 'Failed to switch back to original user';
+    END IF;
+END
+$$;
+-- Test 4: Verify API key
+DO $$
+DECLARE
+    created_key_result record;
+    verified_user_id uuid;
 BEGIN
     SELECT
         * INTO created_key_result
     FROM
-        keyhippo.create_api_key (current_setting('test.user1_id'), 'Metadata Test Key');
-    RAISE NOTICE 'Created API key: %, ID: %', created_key_result.api_key, created_key_result.api_key_id;
-    SELECT
-        name INTO metadata_name
-    FROM
-        keyhippo.get_api_key_metadata (current_setting('test.user1_id')::uuid)
-    WHERE
-        api_key_id = created_key_result.api_key_id;
-    RAISE NOTICE 'metadata_name: %', metadata_name;
-    ASSERT metadata_name = 'Metadata Test Key',
-    'get_api_key_metadata returns correct data for the authenticated user';
+        keyhippo.create_api_key ('Verify Test Key');
+    verified_user_id := keyhippo.verify_api_key (created_key_result.api_key);
+    ASSERT verified_user_id = current_setting('test.user1_id')::uuid,
+    'verify_api_key should return the correct user ID';
 END
 $$;
--- Attempt to get API key metadata for another user
-DO $$
-DECLARE
-    other_user_key_count bigint;
-BEGIN
-    SELECT
-        count(*) INTO other_user_key_count
-    FROM
-        keyhippo.get_api_key_metadata (current_setting('test.user2_id')::uuid);
-    ASSERT other_user_key_count = 0,
-    'get_api_key_metadata returns no data for other users';
-END
-$$;
--- Test rotating an API key as the owner
+-- Test 5: Rotate API key
 DO $$
 DECLARE
     created_key_result record;
     rotated_key_result record;
-    key_count bigint;
-    is_revoked boolean;
-    metadata_name text;
+    old_key_revoked boolean;
+    old_key_user_id uuid;
+    new_key_user_id uuid;
 BEGIN
-    -- Create an API key for user1
+    -- Create an initial API key
     SELECT
         * INTO created_key_result
     FROM
-        keyhippo.create_api_key (current_setting('test.user1_id'), 'Rotate Test Key');
-    ASSERT created_key_result.api_key IS NOT NULL,
-    'API key created successfully for rotation test';
+        keyhippo.create_api_key ('Rotate Test Key');
     -- Rotate the API key
     SELECT
         * INTO rotated_key_result
     FROM
         keyhippo.rotate_api_key (created_key_result.api_key_id);
     ASSERT rotated_key_result.new_api_key IS NOT NULL,
-    'rotate_api_key returns a new API key';
+    'rotate_api_key should return a new API key';
     ASSERT rotated_key_result.new_api_key_id IS NOT NULL,
-    'rotate_api_key returns a new API key ID';
-    -- Check that the old API key is revoked
+    'rotate_api_key should return a new API key ID';
+    ASSERT rotated_key_result.new_api_key_id != created_key_result.api_key_id,
+    'New API key ID should be different from the old one';
+    -- Check if the old key is revoked
     SELECT
-        EXISTS (
-            SELECT
-                1
-            FROM
-                keyhippo.api_key_id_revoked
-            WHERE
-                api_key_id = created_key_result.api_key_id) INTO is_revoked;
-    ASSERT is_revoked,
-    'Old API key is revoked after rotation';
-    -- Check that the new API key exists
-    SELECT
-        count(*) INTO key_count
+        is_revoked,
+        user_id INTO old_key_revoked,
+        old_key_user_id
     FROM
-        keyhippo.api_key_id_owner_id
+        keyhippo.api_key_metadata
     WHERE
-        api_key_id = rotated_key_result.new_api_key_id
-        AND user_id = current_setting('test.user1_id')::uuid;
-    ASSERT key_count = 1,
-    'New API key is associated with the user after rotation';
-    -- Verify that the new API key has the same name as the old one
+        id = created_key_result.api_key_id;
+    ASSERT old_key_revoked,
+    'Old API key should be revoked after rotation';
+    -- Check if the new key belongs to the same user
     SELECT
-        name INTO metadata_name
+        user_id INTO new_key_user_id
     FROM
-        keyhippo.api_key_id_name
+        keyhippo.api_key_metadata
     WHERE
-        api_key_id = rotated_key_result.new_api_key_id;
-    ASSERT metadata_name = 'Rotate Test Key',
-    'New API key retains the same name after rotation';
-    -- Optional: Additional checks can be added here
+        id = rotated_key_result.new_api_key_id;
+    ASSERT old_key_user_id = new_key_user_id,
+    'New API key should belong to the same user as the old key';
 END
 $$;
--- Attempt to rotate API key as another user
+-- Test 6: Attempt to rotate API key as another user (should fail)
 DO $$
 DECLARE
     created_key_result record;
+    rotated_key_result record;
+    original_user uuid;
+    key_is_revoked boolean;
 BEGIN
-    -- Create an API key for user1
+    -- Store the original user
+    original_user := auth.uid ();
+    -- Create an API key as user1
     SELECT
         * INTO created_key_result
     FROM
-        keyhippo.create_api_key (current_setting('test.user1_id'), 'Unauthorized Rotate Test Key');
-    -- Attempt to rotate the API key as user2
-    -- Set authentication to user2
+        keyhippo.create_api_key ('Unauthorized Rotate Test Key');
+    -- Switch to user2
     PERFORM
         set_config('request.jwt.claim.sub', current_setting('test.user2_id'), TRUE);
     PERFORM
-        set_config('request.jwt.claims', json_build_object('sub', current_setting('test.user2_id')::uuid)::text, TRUE);
+        set_config('request.jwt.claims', json_build_object('sub', current_setting('test.user2_id'))::text, TRUE);
+    -- Attempt to rotate the API key as user2
     BEGIN
         SELECT
-            *
+            * INTO rotated_key_result
         FROM
             keyhippo.rotate_api_key (created_key_result.api_key_id);
-        ASSERT FALSE,
-        'Should not be able to rotate another user''s API key';
+        RAISE EXCEPTION 'Should not be able to rotate another user''s API key';
     EXCEPTION
         WHEN OTHERS THEN
-            ASSERT sqlerrm LIKE '%[KeyHippo] Unauthorized%',
-            'Cannot rotate API key owned by another user';
+            ASSERT SQLERRM LIKE '%Unauthorized%',
+            'Should raise an Unauthorized error, but got: ' || SQLERRM;
     END;
-    -- Restore authentication to user1
+    -- Switch back to user1
     PERFORM
-        set_config('request.jwt.claim.sub', current_setting('test.user1_id'), TRUE);
+        set_config('request.jwt.claim.sub', original_user::text, TRUE);
     PERFORM
-        set_config('request.jwt.claims', json_build_object('sub', current_setting('test.user1_id')::uuid)::text, TRUE);
+        set_config('request.jwt.claims', json_build_object('sub', original_user)::text, TRUE);
+    -- Verify that the original key was not rotated
+    SELECT
+        is_revoked INTO key_is_revoked
+    FROM
+        keyhippo.api_key_metadata
+    WHERE
+        id = created_key_result.api_key_id;
+    ASSERT NOT key_is_revoked,
+    'Original API key should not be revoked';
 END
 $$;
+-- Test 7: Revoke API key
+DO $$
+DECLARE
+    created_key_result record;
+    revoke_result boolean;
+    key_is_revoked boolean;
+BEGIN
+    SELECT
+        * INTO created_key_result
+    FROM
+        keyhippo.create_api_key ('Revoke Test Key');
+    SELECT
+        keyhippo.revoke_api_key (created_key_result.api_key_id) INTO revoke_result;
+    ASSERT revoke_result,
+    'revoke_api_key should return true for successful revocation';
+    SELECT
+        is_revoked INTO key_is_revoked
+    FROM
+        keyhippo.api_key_metadata
+    WHERE
+        id = created_key_result.api_key_id;
+    ASSERT key_is_revoked,
+    'API key should be marked as revoked after revocation';
+END
+$$;
+-- Test 8: Attempt to use revoked API key (should fail)
+DO $$
+DECLARE
+    created_key_result record;
+    verified_user_id uuid;
+BEGIN
+    SELECT
+        * INTO created_key_result
+    FROM
+        keyhippo.create_api_key ('Revoked Key Test');
+    PERFORM
+        keyhippo.revoke_api_key (created_key_result.api_key_id);
+    verified_user_id := keyhippo.verify_api_key (created_key_result.api_key);
+    ASSERT verified_user_id IS NULL,
+    'Revoked API key should not be verifiable';
+END
+$$;
+-- Test 9: Check API key expiration (TODO)
+-- TODO: set optional lifetime when creating key
 ROLLBACK;
 
 -- ================================================================

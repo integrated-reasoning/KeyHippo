@@ -1,215 +1,207 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 
+// Base types
 /**
- * Logger interface defining methods for different logging levels.
+ * A timestamp as a string.
  */
-export interface Logger {
-  /**
-   * Logs an informational message.
-   * @param message - The informational message to log.
-   */
-  info: (message: string) => void;
+export type Timestamp = string;
 
-  /**
-   * Logs a warning message.
-   * @param message - The warning message to log.
-   */
-  warn: (message: string) => void;
+/**
+ * The actual text of an API key.
+ */
+export type ApiKeyText = string;
 
-  /**
-   * Logs an error message.
-   * @param message - The error message to log.
-   */
-  error: (message: string) => void;
+/**
+ * The unique identifier of an API key.
+ */
+export type ApiKeyId = string;
 
-  /**
-   * Logs a debug message.
-   * @param message - The debug message to log.
-   */
-  debug: (message: string) => void;
+/**
+ * The unique identifier of a user.
+ */
+export type UserId = string;
+
+/**
+ * A description text.
+ */
+export type Description = string;
+
+/**
+ * A permission level.
+ */
+export type Permission = string;
+
+/**
+ * A name or title.
+ */
+export type Name = string;
+
+/**
+ * A message string.
+ */
+export type Message = string;
+
+// Utility types
+/**
+ * Makes a type optional by allowing it to be null.
+ */
+type Optional<T> = T | null;
+
+/**
+ * Makes specified properties of a type optional.
+ */
+type WithOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+
+// Status types
+/**
+ * The status of an operation.
+ */
+type OperationStatus = "success" | "failed";
+
+/**
+ * The status of an API key.
+ */
+type ApiKeyStatus = OperationStatus;
+
+// Common fields
+/**
+ * Interface for objects that have a creation timestamp.
+ */
+interface Timestamped {
+  createdAt: Timestamp;
 }
 
 /**
- * Represents the response containing an API key.
+ * Interface for objects that have a unique identifier.
  */
-export type ApiKeyResponse = {
-  /**
-   * The API key string.
-   */
-  api_key: string;
-};
-
-/**
- * Represents a record of an API key in the database.
- */
-export type ApiKeyRecord = {
-  /**
-   * The unique identifier of the API key.
-   */
-  id: string;
-
-  /**
-   * A description of the API key.
-   */
-  description: string;
-
-  /**
-   * The API key string.
-   */
-  api_key: string;
-};
-
-/**
- * Represents basic information about an API key.
- */
-export type ApiKeyInfo = {
-  /**
-   * The unique identifier of the API key.
-   */
-  id: string;
-
-  /**
-   * A description of the API key.
-   */
-  description: string;
-};
-
-/**
- * Extends ApiKeyInfo with additional details about the API key.
- */
-export interface CompleteApiKeyInfo extends ApiKeyInfo {
-  /**
-   * The API key string. It can be null if the key is not available.
-   */
-  apiKey: string | null;
-
-  /**
-   * The status of the API key creation or rotation.
-   */
-  status: "success" | "failed";
-
-  /**
-   * Optional error message if the status is "failed".
-   */
-  error?: string;
+interface Identifiable {
+  id: ApiKeyId;
 }
 
 /**
- * Represents the result of an API key operation.
+ * Interface for objects that have a description.
  */
-export interface ApiKeyResult {
-  /**
-   * Indicates whether the operation was successful.
-   */
+interface Describable {
+  description: Description;
+}
+
+// API Key related types
+/**
+ * Base interface for API key related types.
+ */
+interface ApiKeyBase extends Identifiable, Describable {}
+
+/**
+ * A summarized view of an API key.
+ */
+export type ApiKeySummary = ApiKeyBase;
+
+/**
+ * Interface for API key metadata fields.
+ */
+interface ApiKeyMetadataFields {
+  name: Name;
+  permission: Permission;
+  lastUsedAt: Timestamp;
+  revokedAt: Optional<Timestamp>;
+  totalUses: number;
+  successRate: number;
+  totalCost: number;
+}
+
+/**
+ * The full metadata of an API key.
+ */
+export type ApiKeyMetadata = ApiKeyBase & ApiKeyMetadataFields & Timestamped;
+
+/**
+ * The complete entity of an API key.
+ */
+export interface ApiKeyEntity extends ApiKeySummary {
+  user_id: UserId;
+  created_at: Timestamp;
+  last_used_at: Timestamp | null;
+  expires_at: Timestamp;
+  is_revoked: boolean;
+  apiKey: ApiKeyText | null;
+}
+
+// Operation result types
+/**
+ * Interface for the result of an operation.
+ */
+interface OperationResult {
   success: boolean;
-
-  /**
-   * The API key string if the operation was successful.
-   */
-  api_key?: string;
-
-  /**
-   * The error message if the operation failed.
-   */
-  error?: string;
-
-  /**
-   * An optional message providing additional context.
-   */
-  message?: string;
+  error?: Message;
+  message?: Message;
 }
 
 /**
- * Represents the result of rotating an API key.
+ * The result of an API key operation.
+ */
+export type ApiKeyOperationResult = OperationResult & {
+  apiKey?: ApiKeyText;
+};
+
+/**
+ * The result of rotating an API key.
  */
 export type RotateApiKeyResult = {
-  /**
-   * The new API key string generated after rotation.
-   */
-  new_api_key: string;
-
-  /**
-   * The unique identifier of the new API key.
-   */
-  new_api_key_id: string;
-
-  /**
-   * An optional description of the new API key.
-   */
-  description?: string;
+  apiKey: ApiKeyText;
+  id: ApiKeyId;
+  status: OperationStatus;
 };
 
+// Error types
 /**
- * Represents metadata associated with an API key.
+ * The types of application errors.
  */
-export type ApiKeyMetadata = {
-  /**
-   * The unique identifier of the API key.
-   */
-  api_key_id: string;
+type ErrorType =
+  | "DatabaseError"
+  | "UnauthorizedError"
+  | "ValidationError"
+  | "NetworkError"
+  | "AuthenticationError";
 
-  /**
-   * The name of the API key.
-   */
-  name: string;
+/**
+ * An application error with a type and message.
+ */
+export type ApplicationError = {
+  [K in ErrorType]: { type: K; message: Message };
+}[ErrorType];
 
-  /**
-   * The permission level associated with the API key.
-   */
-  permission: string;
-
-  /**
-   * The timestamp of when the API key was last used.
-   */
-  last_used: string;
-
-  /**
-   * The timestamp of when the API key was created.
-   */
-  created: string;
-
-  /**
-   * The timestamp of when the API key was revoked, if applicable.
-   */
-  revoked: string;
-
-  /**
-   * The total number of times the API key has been used.
-   */
-  total_uses: number;
-
-  /**
-   * The success rate of the API key usage.
-   */
-  success_rate: number;
-
-  /**
-   * The total cost associated with the API key usage.
-   */
-  total_cost: number;
+// Authentication types
+/**
+ * The result of an authentication operation.
+ */
+export type AuthenticationResult = {
+  userId: UserId;
+  supabase: SupabaseClient<any, "public", any>;
 };
 
-/**
- * Represents various application-specific errors.
- */
-export type AppError =
-  | { _tag: "DatabaseError"; message: string }
-  | { _tag: "UnauthorizedError"; message: string }
-  | { _tag: "ValidationError"; message: string }
-  | { _tag: "NetworkError"; message: string }
-  | { _tag: "AuthenticationError"; message: string };
-
-/**
- * Represents the result of an authentication operation.
- */
+// Authorization types
 export type AuthResult = {
   /**
    * The unique identifier of the authenticated user.
    */
-  userId: string;
+  userId: UserId;
 
   /**
-   * The Supabase client instance associated with the authenticated session.
+   * The authenticated Supabase client instance.
    */
-  supabase: SupabaseClient<any, "public", any>;
+  supabase: SupabaseClient;
+};
+
+
+// Logger interface
+/**
+ * The available log levels.
+ */
+type LogLevel = "info" | "warn" | "error" | "debug";
+
+/**
+ * Interface for a logger with methods for different log levels.
+ */
+export type Logger = {
+  [K in LogLevel]: (message: Message) => void;
 };

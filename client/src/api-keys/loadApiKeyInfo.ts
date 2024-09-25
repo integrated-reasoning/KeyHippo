@@ -1,94 +1,99 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { ApiKeyInfo, Logger } from "../types";
-import {
-  logDebug,
-  logWarn,
-  logInfo,
-  logError,
-  createDatabaseError,
-  parseApiKeyInfo,
-  validateRpcResult
-} from "../utils";
+import { ApiKeySummary, Logger } from "../types";
+import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
+
+// Define the shape of the data returned from the query
+interface ApiKeyMetadata {
+  id: string;
+  description: string;
+}
 
 /**
- * Executes the RPC call to load API key information for a user.
+ * Executes the query to load API key summary information for the current user.
  * @param supabase - The Supabase client instance.
- * @param userId - The ID of the user whose API key information is being loaded.
- * @returns A promise that resolves with the RPC result containing data or an error.
- * @throws Error if the RPC call fails.
+ * @returns A promise that resolves with the query result containing data or an error.
+ * @throws Error if the query fails.
  */
-const executeLoadApiKeyInfoRpc = async (
+const executeLoadApiKeySummaryQuery = async (
   supabase: SupabaseClient<any, "public", any>,
-  userId: string,
-): Promise<any> => {
+): Promise<{ data: ApiKeyMetadata[] | null; error: any }> => {
   return await supabase
     .schema("keyhippo")
-    .rpc("load_api_key_info", { id_of_user: userId });
+    .from("api_key_metadata")
+    .select("id, description")
+    .eq("is_revoked", false);
 };
 
 /**
- * Logs detailed information about the RPC call result.
+ * Logs detailed information about the query result.
  * @param logger - The logger instance used for logging.
- * @param result - The result object returned from the RPC call.
+ * @param result - The result object returned from the query.
  */
-const logRpcResult = (logger: Logger, result: any): void => {
-  logDebug(logger, `Raw result from RPC: ${JSON.stringify(result)}`);
-  logDebug(
-    logger,
-    `Result status: ${result.status}, statusText: ${result.statusText}`,
-  );
+const logQueryResult = (
+  logger: Logger,
+  result: { data: ApiKeyMetadata[] | null; error: any },
+): void => {
+  logDebug(logger, `Raw result from query: ${JSON.stringify(result)}`);
   logDebug(logger, `Result error: ${JSON.stringify(result.error)}`);
   logDebug(logger, `Result data: ${JSON.stringify(result.data)}`);
 };
 
 /**
- * Logs the successful loading of API key information.
+ * Logs the successful loading of API key summary information.
  * @param logger - The logger instance used for logging.
- * @param userId - The ID of the user whose API key information was loaded.
- * @param count - The number of API key information entries loaded.
+ * @param count - The number of API key summary entries loaded.
  */
-const logApiKeyInfoLoaded = (
-  logger: Logger,
-  userId: string,
-  count: number,
-): void => {
-  logInfo(logger, `API key info loaded for user: ${userId}. Count: ${count}`);
+const logApiKeySummaryLoaded = (logger: Logger, count: number): void => {
+  logInfo(logger, `API key summaries loaded. Count: ${count}`);
 };
 
 /**
- * Handles errors that occur during the loading of API key information.
+ * Handles errors that occur during the loading of API key summary information.
  * @param error - The error encountered during the loading process.
  * @param logger - The logger instance used for logging errors.
  * @throws AppError encapsulating the original error with a descriptive message.
  */
-const handleLoadApiKeyInfoError = (error: unknown, logger: Logger): never => {
-  logError(logger, `Failed to load API key info: ${error}`);
-  throw createDatabaseError(`Failed to load API key info: ${error}`);
+const handleLoadApiKeySummaryError = (
+  error: unknown,
+  logger: Logger,
+): never => {
+  logError(logger, `Failed to load API key summaries: ${error}`);
+  throw createDatabaseError(`Failed to load API key summaries: ${error}`);
 };
 
 /**
- * Loads API key information for a user.
+ * Loads API key summary information for the current user.
  * @param supabase - The Supabase client used to interact with the database.
- * @param userId - The ID of the user whose API key information is to be loaded.
  * @param logger - The logger instance used for logging events and errors.
- * @returns A promise that resolves with an array of API key information.
+ * @returns A promise that resolves with an array of API key summary information.
  * @throws AppError if the loading process fails.
  */
-export const loadApiKeyInfo = async (
+export const loadApiKeySummaries = async (
   supabase: SupabaseClient<any, "public", any>,
-  userId: string,
   logger: Logger,
-): Promise<ApiKeyInfo[]> => {
+): Promise<ApiKeySummary[]> => {
   try {
-    const result = await executeLoadApiKeyInfoRpc(supabase, userId);
-    logRpcResult(logger, result);
-    validateRpcResult(result, "load_api_key_info");
+    const { data, error } = await executeLoadApiKeySummaryQuery(supabase);
+    logQueryResult(logger, { data, error });
 
-    const apiKeyInfo = parseApiKeyInfo(result.data);
-    logApiKeyInfoLoaded(logger, userId, apiKeyInfo.length);
+    if (error) {
+      throw error;
+    }
 
-    return apiKeyInfo;
+    if (!data) {
+      return [];
+    }
+
+    const apiKeySummaries: ApiKeySummary[] = data.map(
+      (item: ApiKeyMetadata) => ({
+        id: item.id,
+        description: item.description,
+      }),
+    );
+
+    logApiKeySummaryLoaded(logger, apiKeySummaries.length);
+    return apiKeySummaries;
   } catch (error) {
-    return handleLoadApiKeyInfoError(error, logger);
+    return handleLoadApiKeySummaryError(error, logger);
   }
 };

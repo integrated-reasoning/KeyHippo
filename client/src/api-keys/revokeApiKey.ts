@@ -5,41 +5,34 @@ import { logInfo, logError, createDatabaseError } from "../utils";
 /**
  * Executes the RPC call to revoke an existing API key for a user.
  * @param supabase - The Supabase client instance.
- * @param userId - The ID of the user whose API key is to be revoked.
- * @param secretId - The secret ID of the API key to revoke.
- * @returns A promise that resolves when the API key revocation is successful.
+ * @param apiKeyId - The UUID of the API key to revoke.
+ * @returns A promise that resolves to a boolean indicating success of the revocation.
  * @throws Error if the RPC call fails to revoke the API key.
  */
 const executeRevokeApiKeyRpc = async (
   supabase: SupabaseClient<any, "public", any>,
-  userId: string,
-  secretId: string,
-): Promise<void> => {
-  const { error } = await supabase.schema("keyhippo").rpc("revoke_api_key", {
-    id_of_user: userId,
-    secret_id: secretId,
-  });
+  apiKeyId: string,
+): Promise<boolean> => {
+  const { data, error } = await supabase
+    .schema("keyhippo")
+    .rpc("revoke_api_key", {
+      api_key_id: apiKeyId,
+    });
 
   if (error) {
     throw new Error(`Error revoking API key: ${error.message}`);
   }
+
+  return data || false;
 };
 
 /**
- * Logs the successful revocation of an API key for a user.
+ * Logs the successful revocation of an API key.
  * @param logger - The logger instance used for logging.
- * @param userId - The ID of the user whose API key was revoked.
- * @param secretId - The secret ID of the revoked API key.
+ * @param apiKeyId - The UUID of the revoked API key.
  */
-const logApiKeyRevocation = (
-  logger: Logger,
-  userId: string,
-  secretId: string,
-): void => {
-  logInfo(
-    logger,
-    `API key revoked for user: ${userId}, Secret ID: ${secretId}`,
-  );
+const logApiKeyRevocation = (logger: Logger, apiKeyId: string): void => {
+  logInfo(logger, `API key revoked: ${apiKeyId}`);
 };
 
 /**
@@ -54,23 +47,24 @@ const handleRevokeApiKeyError = (error: unknown, logger: Logger): never => {
 };
 
 /**
- * Revokes an existing API key for a user.
+ * Revokes an existing API key.
  * @param supabase - The Supabase client used to interact with the database.
- * @param userId - The ID of the user whose API key is to be revoked.
- * @param secretId - The secret ID of the API key to revoke.
+ * @param apiKeyId - The UUID of the API key to revoke.
  * @param logger - The logger instance used for logging events and errors.
- * @returns A promise that resolves when the API key has been successfully revoked.
+ * @returns A promise that resolves to a boolean indicating success of the revocation.
  * @throws AppError if the revocation process fails.
  */
 export const revokeApiKey = async (
   supabase: SupabaseClient<any, "public", any>,
-  userId: string,
-  secretId: string,
+  apiKeyId: string,
   logger: Logger,
-): Promise<void> => {
+): Promise<boolean> => {
   try {
-    await executeRevokeApiKeyRpc(supabase, userId, secretId);
-    logApiKeyRevocation(logger, userId, secretId);
+    const success = await executeRevokeApiKeyRpc(supabase, apiKeyId);
+    if (success) {
+      logApiKeyRevocation(logger, apiKeyId);
+    }
+    return success;
   } catch (error) {
     return handleRevokeApiKeyError(error, logger);
   }

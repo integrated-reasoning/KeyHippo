@@ -74,7 +74,7 @@ apply-integration-test-migrations:
 	@echo "ALTER TABLE public.test_accounts ENABLE ROW LEVEL SECURITY;" >> create_test_accounts.sql
 	@echo "" >> create_test_accounts.sql
 	@echo "CREATE POLICY \"Users can access their own test account\" ON public.test_accounts TO anon, authenticated" >> create_test_accounts.sql
-	@echo "    USING ((COALESCE(auth.uid (), keyhippo.key_uid ()) = user_id));" >> create_test_accounts.sql
+	@echo "    USING ((COALESCE(auth.uid (), keyhippo.current_user_id ()) = user_id));" >> create_test_accounts.sql
 	@echo "" >> create_test_accounts.sql
 	@echo "GRANT SELECT ON public.test_accounts TO anon, authenticated;" >> create_test_accounts.sql
 	@echo "GRANT INSERT, UPDATE, DELETE ON public.test_accounts TO authenticated;" >> create_test_accounts.sql

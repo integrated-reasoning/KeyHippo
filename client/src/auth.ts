@@ -1,13 +1,18 @@
 import { SupabaseClient, createClient } from "@supabase/supabase-js";
-import { AppError, AuthResult, Logger } from "./types";
-import { createUnauthorizedError, createAuthenticationError } from "./utils";
+import {
+  ApiKeyText,
+  AuthResult,
+  Logger,
+  ApplicationError,
+  UserId,
+} from "./types";
 
 /**
  * Extracts the API key from the Authorization header.
  * @param headers - The request headers.
  * @returns The API key if present, otherwise null.
  */
-const extractApiKey = (headers: Headers): string | null => {
+const extractApiKey = (headers: Headers): ApiKeyText | null => {
   const authHeader = headers.get("Authorization");
   if (authHeader && authHeader.startsWith("Bearer ")) {
     return authHeader.split(" ")[1];
@@ -23,13 +28,13 @@ const extractApiKey = (headers: Headers): string | null => {
  */
 const createAuthenticatedSupabaseClient = (
   supabase: SupabaseClient,
-  apiKey: string,
+  apiKey: ApiKeyText,
 ): SupabaseClient => {
   return createClient(
-    (supabase as any).supabaseUrl, // Cast away protected
+    (supabase as any).supabaseUrl,
     (supabase as any).supabaseKey,
     {
-      global: { headers: { Authorization: apiKey } },
+      global: { headers: { "x-api-key": apiKey } },
       auth: {
         persistSession: false,
         detectSessionInUrl: false,
@@ -44,22 +49,28 @@ const createAuthenticatedSupabaseClient = (
  * @param authenticatedSupabase - The authenticated Supabase client.
  * @param apiKey - The API key.
  * @returns The user ID.
- * @throws UnauthorizedError if the API key is invalid or does not correspond to any user.
+ * @throws ApplicationError if the API key is invalid or does not correspond to any user.
  */
 const getUserIdForApiKey = async (
   authenticatedSupabase: SupabaseClient,
-  apiKey: string,
-): Promise<string> => {
+  apiKey: ApiKeyText,
+): Promise<UserId> => {
   const { data: userId, error: apiKeyError } = await authenticatedSupabase
     .schema("keyhippo")
-    .rpc("get_uid_for_key", { user_api_key: apiKey });
+    .rpc("verify_api_key", { api_key: apiKey });
 
   if (apiKeyError) {
-    throw createUnauthorizedError("Invalid API key.");
+    throw {
+      type: "UnauthorizedError",
+      message: "Invalid API key.",
+    } as ApplicationError;
   }
 
   if (!userId) {
-    throw createUnauthorizedError("API key does not correspond to any user.");
+    throw {
+      type: "UnauthorizedError",
+      message: "API key does not correspond to any user.",
+    } as ApplicationError;
   }
 
   return userId;
@@ -69,22 +80,28 @@ const getUserIdForApiKey = async (
  * Retrieves the authenticated user's ID using the Supabase client.
  * @param supabase - The Supabase client.
  * @returns The authenticated user's ID.
- * @throws AuthenticationError if retrieving the user fails or the user is not authenticated.
+ * @throws ApplicationError if retrieving the user fails or the user is not authenticated.
  */
 const getAuthenticatedUserId = async (
   supabase: SupabaseClient,
-): Promise<string> => {
+): Promise<UserId> => {
   const {
     data: { user },
     error,
   } = await supabase.auth.getUser();
 
   if (error) {
-    throw createAuthenticationError("Failed to retrieve authenticated user.");
+    throw {
+      type: "AuthenticationError",
+      message: "Failed to retrieve authenticated user.",
+    } as ApplicationError;
   }
 
   if (!user) {
-    throw createUnauthorizedError("User not authenticated.");
+    throw {
+      type: "UnauthorizedError",
+      message: "User not authenticated.",
+    } as ApplicationError;
   }
 
   return user.id;
@@ -95,7 +112,7 @@ const getAuthenticatedUserId = async (
  * @param logger - The logger instance.
  * @param userId - The authenticated user's ID.
  */
-const logAuthentication = (logger: Logger, userId: string): void => {
+const logAuthentication = (logger: Logger, userId: UserId): void => {
   logger.info(`User authenticated: ${userId}`);
 };
 
@@ -103,31 +120,30 @@ const logAuthentication = (logger: Logger, userId: string): void => {
  * Handles errors that occur during the authentication process.
  * @param error - The error encountered.
  * @param logger - The logger instance.
- * @throws AppError based on the error type.
+ * @throws ApplicationError based on the error type.
  */
 const handleAuthenticationError = (error: unknown, logger: Logger): never => {
   if (
     error &&
     typeof error === "object" &&
-    "_tag" in error &&
-    typeof (error as AppError)._tag === "string" &&
-    "message" in error &&
-    typeof (error as AppError).message === "string"
+    "type" in error &&
+    "message" in error
   ) {
-    // If the error is already an AppError, rethrow it
-    throw error;
+    const appError = error as ApplicationError;
+    logger.error(`Authentication failed: ${appError.message}`);
+    throw appError;
   } else if (error instanceof Error) {
-    // Handle standard Error objects
     logger.error(`Authentication failed: ${error.message}`);
-    throw createAuthenticationError(
-      "Authentication failed due to an unexpected error.",
-    );
+    throw {
+      type: "AuthenticationError",
+      message: "Authentication failed due to an unexpected error.",
+    } as ApplicationError;
   } else {
-    // Handle non-Error, non-AppError objects
     logger.error(`Authentication failed: ${String(error)}`);
-    throw createAuthenticationError(
-      "Authentication failed due to an unknown error.",
-    );
+    throw {
+      type: "AuthenticationError",
+      message: "Authentication failed due to an unknown error.",
+    } as ApplicationError;
   }
 };
 
@@ -137,7 +153,7 @@ const handleAuthenticationError = (error: unknown, logger: Logger): never => {
  * @param supabase - The Supabase client.
  * @param logger - The logger instance.
  * @returns An AuthResult containing the user ID and authenticated Supabase client.
- * @throws AppError if authentication fails.
+ * @throws ApplicationError if authentication fails.
  */
 export const authenticate = async (
   headers: Headers,
@@ -160,7 +176,6 @@ export const authenticate = async (
       return { userId, supabase };
     }
   } catch (error) {
-    // Use 'return' to help TypeScript understand that this path never returns
     return handleAuthenticationError(error, logger);
   }
 };
