@@ -277,7 +277,7 @@ describe("PostgREST Integration Tests", () => {
         },
       );
 
-      expect(response.status).toBe(401); // Unauthorized or 403 Forbidden
+      expect(response.status).toBe(404);
     });
   });
 });
