@@ -5,11 +5,12 @@ import { setupTest, TestSetup } from "./testSetup";
 let testSetup: TestSetup;
 let testAccountId: string;
 let apiKey: string;
+let apiKeyId: string;
 
 const headers = () => ({
   apikey: process.env.SUPABASE_ANON_KEY!,
   Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY!}`,
-  "x-kh-api-key": apiKey,
+  "x-api-key": apiKey,
 });
 
 const fetchData = async (
@@ -33,12 +34,10 @@ const fetchData = async (
 beforeAll(async () => {
   testSetup = await setupTest();
 
-  const keyDescription = "Test Key for x-kh-api-key";
-  const result = await testSetup.keyHippo.createApiKey(
-    testSetup.userId,
-    keyDescription,
-  );
+  const keyDescription = "Test Key for x-api-key";
+  const result = await testSetup.keyHippo.createApiKey(keyDescription);
   apiKey = result.apiKey!;
+  apiKeyId = result.id;
 
   const uniqueEmail = `testuser+${uuidv4()}@example.com`;
 
@@ -63,10 +62,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    const keyInfos = await testSetup.keyHippo.loadApiKeyInfo(testSetup.userId);
-    for (const keyInfo of keyInfos) {
-      await testSetup.keyHippo.revokeApiKey(testSetup.userId, keyInfo.id);
-    }
+    await testSetup.keyHippo.revokeApiKey(apiKeyId);
 
     await fetchData(
       `${process.env.SUPABASE_URL}/rest/v1/test_accounts?user_id=eq.${testSetup.userId}`,
@@ -183,7 +179,6 @@ describe("PostgREST Integration Tests", () => {
       await testSetup.supabase.auth.signInAnonymously();
     const newUserId = newUserData.user!.id;
     const newUserKeyResult = await testSetup.keyHippo.createApiKey(
-      newUserId,
       "Test Key for New User",
     );
     const newUserApiKey = newUserKeyResult.apiKey!;
@@ -192,36 +187,97 @@ describe("PostgREST Integration Tests", () => {
       `${process.env.SUPABASE_URL}/rest/v1/test_accounts?user_id=eq.${testSetup.userId}`,
       {
         method: "GET",
-        headers: { "x-kh-api-key": newUserApiKey },
+        headers: { "x-api-key": newUserApiKey },
       },
     );
 
     expect(Array.isArray(data)).toBe(true);
     expect(data.length).toBe(0);
 
-    await testSetup.keyHippo.revokeApiKey(newUserId, newUserKeyResult.id);
+    await testSetup.keyHippo.revokeApiKey(newUserKeyResult.id);
   });
 
-  describe("Keyhippo Schema Tests", () => {
-    const keyhippoHeaders = {
-      "Accept-Profile": "keyhippo",
-      Accept: "application/json",
-    };
+  describe("KeyHippo Schema Tests", () => {
+    let testApiKey: string;
+    let testApiKeyId: string;
 
-    it("should access the api_key_id_created table in keyhippo schema", async () => {
-      const data = await fetchData(
-        `${process.env.SUPABASE_URL}/rest/v1/api_key_id_created?select=*`,
-        { method: "GET" },
-        keyhippoHeaders,
+    beforeAll(async () => {
+      const keyDescription = "Test Key for Schema Test";
+      const result = await testSetup.keyHippo.createApiKey(keyDescription);
+      testApiKey = result.apiKey!;
+      testApiKeyId = result.id;
+    });
+
+    afterAll(async () => {
+      if (testApiKeyId) {
+        await testSetup.keyHippo.revokeApiKey(testApiKeyId);
+      }
+    });
+
+    it("should access the user's own api_key_metadata in keyhippo schema", async () => {
+      const keyhippoHeaders = {
+        "Accept-Profile": "keyhippo",
+        Accept: "application/json",
+        "x-api-key": testApiKey,
+      };
+
+      const response = await fetch(
+        `${process.env.SUPABASE_URL}/rest/v1/api_key_metadata?select=*`,
+        {
+          method: "GET",
+          headers: {
+            ...headers(),
+            ...keyhippoHeaders,
+          },
+        },
       );
+
+      if (!response.ok) {
+        console.error("Response status:", response.status);
+        console.error("Response headers:", response.headers);
+        const errorBody = await response.text();
+        console.error("Error body:", errorBody);
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
 
       expect(Array.isArray(data)).toBe(true);
       expect(data.length).toBeGreaterThan(0);
 
-      const expectedProperties = ["api_key_id", "created", "owner_id"];
+      const expectedProperties = [
+        "id",
+        "user_id",
+        "description",
+        "created_at",
+        "last_used_at",
+        "expires_at",
+        "is_revoked",
+      ];
+
       expectedProperties.forEach((prop) => {
         expect(data[0]).toHaveProperty(prop);
       });
+
+      // Verify that the test API key is in the returned data
+      const testKey = data.find((key) => key.id === testApiKeyId);
+      expect(testKey).toBeDefined();
+      expect(testKey!.description).toBe("Test Key for Schema Test");
+    });
+
+    it("should not access the api_key_secrets table in keyhippo schema", async () => {
+      const response = await fetch(
+        `${process.env.SUPABASE_URL}/rest/v1/api_key_secrets?select=*`,
+        {
+          method: "GET",
+          headers: {
+            ...headers(),
+            "x-api-key": testApiKey,
+          },
+        },
+      );
+
+      expect(response.status).toBe(401); // Unauthorized or 403 Forbidden
     });
   });
 });
