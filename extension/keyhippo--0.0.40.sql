@@ -106,6 +106,7 @@ CREATE OR REPLACE FUNCTION keyhippo.verify_api_key (api_key text)
     AS $$
 DECLARE
     verified_user_id uuid;
+    authenticated_user_id uuid;
     key_metadata_id uuid;
     current_last_used timestamptz;
     is_valid boolean;
@@ -127,9 +128,16 @@ BEGIN
         s.key_hash = extensions.crypt(api_key, s.key_hash);
     -- If the key is found and is valid, proceed with potential update
     IF verified_user_id IS NOT NULL AND is_valid THEN
+        -- Get the authenticated user ID
+        authenticated_user_id := auth.uid ();
+        -- If the user is already authenticated, ensure the key belongs to them:
+        IF authenticated_user_id IS NOT NULL AND authenticated_user_id != verified_user_id THEN
+            RAISE EXCEPTION 'Unauthorized: Authenticated user % does not own this key', authenticated_user_id;
+        END IF;
         -- If last_used_at needs updating
         IF current_last_used IS NULL OR current_last_used < NOW() - INTERVAL '1 minute' THEN
             -- Perform the update in a separate transaction
+            -- (allows verify_api_key to be called without granting UPDATE)
             PERFORM
                 pg_advisory_xact_lock(hashtext('verify_api_key'::text || key_metadata_id::text));
             BEGIN

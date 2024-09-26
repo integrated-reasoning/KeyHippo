@@ -130,6 +130,52 @@ BEGIN
     'verify_api_key should return the correct user ID';
 END
 $$;
+-- Attempt to verify an API key owned by another user (should fail)
+DO $$
+DECLARE
+    created_key_result record;
+    verified_user_id uuid;
+    original_user uuid;
+    current_user_id uuid;
+    key_count bigint;
+BEGIN
+    SELECT
+        * INTO created_key_result
+    FROM
+        keyhippo.create_api_key ('Verify Test Key');
+    -- Store the original user
+    original_user := auth.uid ();
+    RAISE NOTICE 'Original user: %', original_user;
+    -- Switch to user2
+    PERFORM
+        set_config('request.jwt.claim.sub', current_setting('test.user2_id'), TRUE);
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', current_setting('test.user2_id'))::text, TRUE);
+    current_user_id := auth.uid ();
+    RAISE NOTICE 'Switched to user: %', current_user_id;
+    RAISE NOTICE 'JWT sub claim: %', current_setting('request.jwt.claim.sub', TRUE);
+    IF current_user_id = original_user THEN
+        RAISE EXCEPTION 'Failed to switch user context';
+    END IF;
+    -- Attempt to verify the API key owned by user1 as user2
+    BEGIN
+        verified_user_id := keyhippo.verify_api_key (created_key_result.api_key);
+        RAISE EXCEPTION 'Should not be able to verify another user''s API key';
+    EXCEPTION
+        WHEN OTHERS THEN
+            ASSERT SQLERRM LIKE '%Unauthorized%',
+            'Should raise an Unauthorized error, but got: ' || SQLERRM;
+    END;
+    PERFORM
+        set_config('request.jwt.claim.sub', original_user::text, TRUE);
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', original_user)::text, TRUE);
+    RAISE NOTICE 'Switched back to user: %', auth.uid ();
+    IF auth.uid () != original_user THEN
+        RAISE EXCEPTION 'Failed to switch back to original user';
+        END IF;
+END
+$$;
 -- Rotate API key
 DO $$
 DECLARE
