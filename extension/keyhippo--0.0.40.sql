@@ -161,6 +161,7 @@ BEGIN
     IF c_user_id IS NULL THEN
         RAISE EXCEPTION 'Unauthorized';
     END IF;
+    -- Update to set is_revoked only if it's not already revoked
     UPDATE
         keyhippo.api_key_metadata
     SET
@@ -168,8 +169,14 @@ BEGIN
     WHERE
         id = api_key_id
         AND user_id = c_user_id
+        AND is_revoked = FALSE
     RETURNING
         TRUE INTO success;
+    IF success THEN
+        -- Delete the secret hash to ensure it's no longer usable
+        DELETE FROM keyhippo.api_key_secrets
+        WHERE key_metadata_id = api_key_id;
+    END IF;
     RETURN COALESCE(success, FALSE);
 END;
 $$;
@@ -190,21 +197,22 @@ BEGIN
     IF c_user_id IS NULL THEN
         RAISE EXCEPTION 'Unauthorized: User not authenticated';
     END IF;
-    -- Get description of the old key and check ownership
+    -- Retrieve the description and ensure the key is not revoked
     SELECT
         ak.description INTO key_description
     FROM
         keyhippo.api_key_metadata ak
     WHERE
         ak.id = old_api_key_id
-        AND ak.user_id = c_user_id;
+        AND ak.user_id = c_user_id
+        AND ak.is_revoked = FALSE;
     IF key_description IS NULL THEN
-        RAISE EXCEPTION 'Unauthorized: Invalid or unauthorized API key';
+        RAISE EXCEPTION 'Unauthorized: Invalid or inactive API key';
     END IF;
     -- Revoke the old key
     PERFORM
         keyhippo.revoke_api_key (old_api_key_id);
-    -- Create a new key
+    -- Create a new key with the same description
     RETURN QUERY
     SELECT
         *

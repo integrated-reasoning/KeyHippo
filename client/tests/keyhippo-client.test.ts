@@ -91,7 +91,6 @@ describe("KeyHippo Client Tests", () => {
     const keyDescription = "Key to Rotate";
     const createdKeyInfo =
       await testSetup.keyHippo.createApiKey(keyDescription);
-
     const rotatedKeyInfo = await testSetup.keyHippo.rotateApiKey(
       createdKeyInfo.id,
     );
@@ -159,11 +158,22 @@ describe("KeyHippo Client Tests", () => {
     // Create an API key
     const createdKeyInfo =
       await testSetup.keyHippo.createApiKey(keyDescription);
+    expect(createdKeyInfo.id).toBeDefined();
 
     // Rotate the API key
     const rotatedKeyInfo = await testSetup.keyHippo.rotateApiKey(
       createdKeyInfo.id,
     );
+    console.log("Rotated Key Info:", rotatedKeyInfo);
+
+    if ("status" in rotatedKeyInfo && rotatedKeyInfo.status === "failed") {
+      expect.fail(
+        `API key rotation failed: ${(rotatedKeyInfo as any).message}`,
+      );
+    }
+
+    expect(rotatedKeyInfo.id).toBeDefined();
+    expect(rotatedKeyInfo.apiKey).toBeDefined();
 
     // Verify that the old key is no longer retrievable
     const keySummaries = await testSetup.keyHippo.loadApiKeySummaries();
@@ -176,6 +186,8 @@ describe("KeyHippo Client Tests", () => {
     const newKeyExists = keySummaries.some(
       (key) => key.id === rotatedKeyInfo.id,
     );
+    console.log("Key Summaries:", keySummaries);
+    console.log("Rotated Key ID:", rotatedKeyInfo.id);
     expect(newKeyExists).toBe(true);
 
     // Verify that the description is maintained

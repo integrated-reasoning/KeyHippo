@@ -25,7 +25,7 @@ END
 $$;
 -- Switch to authenticated role
 SET local ROLE authenticated;
--- Test 1: Verify initial state (no API keys)
+-- Verify initial state (no API keys)
 DO $$
 DECLARE
     key_count bigint;
@@ -40,7 +40,7 @@ BEGIN
     'Initially, no API keys should exist for the user';
 END
 $$;
--- Test 2: Create API key
+-- Create API key
 DO $$
 DECLARE
     created_key_result record;
@@ -65,7 +65,7 @@ BEGIN
     'An API key should be created for the authenticated user';
 END
 $$;
--- Test 3: Attempt to create API key for another user (should fail)
+-- Attempt to create API key for another user (should fail)
 DO $$
 DECLARE
     created_key_result record;
@@ -115,7 +115,7 @@ BEGIN
     END IF;
 END
 $$;
--- Test 4: Verify API key
+-- Verify API key
 DO $$
 DECLARE
     created_key_result record;
@@ -130,7 +130,7 @@ BEGIN
     'verify_api_key should return the correct user ID';
 END
 $$;
--- Test 5: Rotate API key
+-- Rotate API key
 DO $$
 DECLARE
     created_key_result record;
@@ -177,7 +177,46 @@ BEGIN
     'New API key should belong to the same user as the old key';
 END
 $$;
--- Test 6: Attempt to rotate API key as another user (should fail)
+-- Rotate same API key twice (should fail)
+DO $$
+DECLARE
+    created_key_result record;
+    rotated_key_result record;
+    old_key_revoked boolean;
+    old_key_user_id uuid;
+    new_key_user_id uuid;
+BEGIN
+    -- Create an initial API key
+    SELECT
+        * INTO created_key_result
+    FROM
+        keyhippo.create_api_key ('Rotate Test Key');
+    -- Rotate the API key
+    SELECT
+        * INTO rotated_key_result
+    FROM
+        keyhippo.rotate_api_key (created_key_result.api_key_id);
+    ASSERT rotated_key_result.new_api_key IS NOT NULL,
+    'rotate_api_key should return a new API key';
+    ASSERT rotated_key_result.new_api_key_id IS NOT NULL,
+    'rotate_api_key should return a new API key ID';
+    ASSERT rotated_key_result.new_api_key_id != created_key_result.api_key_id,
+    'New API key ID should be different from the old one';
+    -- Attemt to rotate the revoked API key again
+    BEGIN
+        SELECT
+            * INTO rotated_key_result
+        FROM
+            keyhippo.rotate_api_key (created_key_result.api_key_id);
+        RAISE EXCEPTION 'Should not be able to rotate another user''s API key';
+    EXCEPTION
+        WHEN OTHERS THEN
+            ASSERT SQLERRM LIKE '%Unauthorized%',
+            'Should raise an Unauthorized error, but got: ' || SQLERRM;
+    END;
+END
+$$;
+-- Attempt to rotate API key as another user (should fail)
 DO $$
 DECLARE
     created_key_result record;
@@ -225,7 +264,7 @@ BEGIN
     'Original API key should not be revoked';
 END
 $$;
--- Test 7: Revoke API key
+-- Revoke API key
 DO $$
 DECLARE
     created_key_result record;
@@ -250,7 +289,27 @@ BEGIN
     'API key should be marked as revoked after revocation';
 END
 $$;
--- Test 8: Attempt to use revoked API key (should fail)
+-- Attempt to revoke an API key twice (should fail)
+DO $$
+DECLARE
+    created_key_result record;
+    revoke_result boolean;
+BEGIN
+    SELECT
+        * INTO created_key_result
+    FROM
+        keyhippo.create_api_key ('Revoke Test Key');
+    SELECT
+        keyhippo.revoke_api_key (created_key_result.api_key_id) INTO revoke_result;
+    ASSERT revoke_result,
+    'revoke_api_key should return true for successful revocation';
+    SELECT
+        keyhippo.revoke_api_key (created_key_result.api_key_id) INTO revoke_result;
+    ASSERT NOT revoke_result,
+    'revoke_api_key should return not true when called on a previously revoked key';
+END
+$$;
+-- Attempt to use revoked API key (should fail)
 DO $$
 DECLARE
     created_key_result record;
@@ -267,7 +326,7 @@ BEGIN
     'Revoked API key should not be verifiable';
 END
 $$;
--- Test 9: Check API key expiration (TODO)
+-- Check API key expiration (TODO)
 -- TODO: set optional lifetime when creating key
 ROLLBACK;
 

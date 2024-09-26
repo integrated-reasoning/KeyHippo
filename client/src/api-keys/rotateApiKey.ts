@@ -1,10 +1,17 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { RotateApiKeyResult, Logger } from "../types";
+import {
+  ApiKeyEntity,
+  RotateApiKeyResult,
+  Logger,
+  ApiKeyId,
+  UserId,
+  Timestamp,
+} from "../types";
 import {
   logInfo,
   logError,
   createDatabaseError,
-  validateRpcResult
+  validateRpcResult,
 } from "../utils";
 
 /**
@@ -16,7 +23,7 @@ import {
  */
 const executeRotateApiKeyRpc = async (
   supabase: SupabaseClient<any, "public", any>,
-  apiKeyId: string,
+  apiKeyId: ApiKeyId,
 ): Promise<any> => {
   return await supabase.schema("keyhippo").rpc("rotate_api_key", {
     old_api_key_id: apiKeyId,
@@ -28,25 +35,8 @@ const executeRotateApiKeyRpc = async (
  * @param logger - The logger instance used for logging.
  * @param newKeyId - The ID of the newly rotated API key.
  */
-const logApiKeyRotation = (
-  logger: Logger,
-  newKeyId: string,
-): void => {
-  logInfo(
-    logger,
-    `API key rotated successfully. New Key ID: ${newKeyId}`,
-  );
-};
-
-/**
- * Handles errors that occur during the API key rotation process.
- * @param error - The error encountered during the rotation process.
- * @param logger - The logger instance used for logging errors.
- * @throws AppError encapsulating the original error with a descriptive message.
- */
-const handleRotateApiKeyError = (error: unknown, logger: Logger): never => {
-  logError(logger, `Failed to rotate API key: ${error}`);
-  throw createDatabaseError(`Failed to rotate API key: ${error}`);
+const logApiKeyRotation = (logger: Logger, newKeyId: ApiKeyId): void => {
+  logInfo(logger, `API key rotated successfully. New Key ID: ${newKeyId}`);
 };
 
 /**
@@ -55,26 +45,41 @@ const handleRotateApiKeyError = (error: unknown, logger: Logger): never => {
  * @param apiKeyId - The ID of the API key to rotate.
  * @param logger - The logger instance used for logging events and errors.
  * @returns A promise that resolves with the information of the rotated API key.
- * @throws AppError if the rotation process fails.
+ * @throws Error if the rotation process fails.
  */
 export const rotateApiKey = async (
   supabase: SupabaseClient<any, "public", any>,
-  apiKeyId: string,
+  apiKeyId: ApiKeyId,
   logger: Logger,
 ): Promise<RotateApiKeyResult> => {
   try {
     const result = await executeRotateApiKeyRpc(supabase, apiKeyId);
     validateRpcResult(result, "rotate_api_key");
 
+    if (
+      !result.data ||
+      !Array.isArray(result.data) ||
+      result.data.length === 0
+    ) {
+      throw new Error("Invalid response from API key rotation");
+    }
+
+    const rotatedKeyData = result.data[0];
+
+    if (!rotatedKeyData.new_api_key || !rotatedKeyData.new_api_key_id) {
+      throw new Error("Invalid response structure from API key rotation");
+    }
+
     const rotatedKeyInfo: RotateApiKeyResult = {
-      apiKey: result.data.new_api_key,
-      id: result.data.new_api_key_id,
-      status: "success"
+      apiKey: rotatedKeyData.new_api_key,
+      id: rotatedKeyData.new_api_key_id,
+      status: "success",
     };
 
     logApiKeyRotation(logger, rotatedKeyInfo.id);
     return rotatedKeyInfo;
   } catch (error) {
-    return handleRotateApiKeyError(error, logger);
+    logError(logger, `Failed to rotate API key: ${error}`);
+    throw new Error(`Failed to rotate API key: ${error}`);
   }
 };
