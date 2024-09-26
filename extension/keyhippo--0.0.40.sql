@@ -106,22 +106,52 @@ CREATE OR REPLACE FUNCTION keyhippo.verify_api_key (api_key text)
     AS $$
 DECLARE
     verified_user_id uuid;
+    key_metadata_id uuid;
+    current_last_used timestamptz;
+    is_valid boolean;
 BEGIN
-    UPDATE
-        keyhippo.api_key_metadata m
-    SET
-        last_used_at = NOW()
+    -- First, retrieve the necessary information without updating
+    SELECT
+        m.user_id,
+        m.id,
+        m.last_used_at,
+        (NOT m.is_revoked
+            AND m.expires_at > NOW()) AS valid INTO verified_user_id,
+        key_metadata_id,
+        current_last_used,
+        is_valid
     FROM
-        keyhippo.api_key_secrets s
+        keyhippo.api_key_metadata m
+        JOIN keyhippo.api_key_secrets s ON m.id = s.key_metadata_id
     WHERE
-        m.id = s.key_metadata_id
-        AND s.key_hash = extensions.crypt(api_key, s.key_hash)
-        AND NOT m.is_revoked
-        AND m.expires_at > NOW()
-    RETURNING
-        m.user_id INTO verified_user_id;
+        s.key_hash = extensions.crypt(api_key, s.key_hash);
+    -- If the key is found and is valid, proceed with potential update
+    IF verified_user_id IS NOT NULL AND is_valid THEN
+        -- If last_used_at needs updating
+        IF current_last_used IS NULL OR current_last_used < NOW() - INTERVAL '1 minute' THEN
+            -- Perform the update in a separate transaction
+            PERFORM
+                pg_advisory_xact_lock(hashtext('verify_api_key'::text || key_metadata_id::text));
+            BEGIN
+                UPDATE
+                    keyhippo.api_key_metadata
+                SET
+                    last_used_at = NOW()
+                WHERE
+                    id = key_metadata_id;
+            EXCEPTION
+                WHEN read_only_sql_transaction THEN
+                    -- Log the error or handle it as needed
+                    RAISE NOTICE 'Could not update last_used_at in read-only transaction';
+            END;
+        END IF;
+ELSE
+    -- If the key is not valid, set verified_user_id to NULL
+    verified_user_id := NULL;
+    END IF;
     RETURN verified_user_id;
 END;
+
 $$;
 
 -- Function to get user_id from API key or JWT
