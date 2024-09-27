@@ -97,6 +97,8 @@ DECLARE
     new_api_key_id uuid;
     authenticated_user_id uuid;
     prefix text;
+    prehashed_key text;
+    truncated_prehashed_key text;
 BEGIN
     -- Get the authenticated user ID
     authenticated_user_id := auth.uid ();
@@ -124,9 +126,13 @@ BEGIN
         WHEN unique_violation THEN
             RAISE EXCEPTION '[KeyHippo] Prefix collision occurred, unable to insert API key metadata';
     END;
-    -- Store the hashed key in the secrets table
+    -- Pre-hash the new_api_key using SHA-512 and base64 encode it to prevent null byte bcrypt issues
+    prehashed_key := encode(extensions.digest(new_api_key, 'sha512'), 'base64');
+    -- Truncate the base64-encoded string to 72 characters to fit bcrypt's limit
+    truncated_prehashed_key := substring(prehashed_key, 1, 72);
+    -- Store the hashed key in the secrets table using bcrypt
     INSERT INTO keyhippo.api_key_secrets (key_metadata_id, key_hash)
-        VALUES (new_api_key_id, extensions.crypt(new_api_key, extensions.gen_salt('bf', 8)));
+        VALUES (new_api_key_id, extensions.crypt(truncated_prehashed_key, extensions.gen_salt('bf', 9)));
     -- Return the concatenated API key (prefix + key) and its ID
     RETURN QUERY
     SELECT
@@ -152,6 +158,8 @@ DECLARE
     prefix_part text;
     key_part text;
     stored_key_hash text;
+    prehashed_key_part text;
+    truncated_prehashed_key_part text;
 BEGIN
     -- Ensure the API key is long enough to contain the key part (128 characters for SHA512 hex)
     IF LENGTH(api_key) <= 128 THEN
@@ -189,8 +197,12 @@ BEGIN
         keyhippo.api_key_secrets s
     WHERE
         s.key_metadata_id = metadata_id;
-    -- Verify the key using crypt
-    IF stored_key_hash = extensions.crypt(key_part, stored_key_hash) THEN
+    -- Pre-hash the new_api_key using SHA-512 and base64 encode it to prevent null byte bcrypt issues
+    prehashed_key_part := encode(extensions.digest(key_part, 'sha512'), 'base64');
+    -- Truncate the base64-encoded string to 72 characters to fit bcrypt's limit
+    truncated_prehashed_key_part := substring(prehashed_key_part, 1, 72);
+    -- Verify the key using bcrypt
+    IF stored_key_hash = extensions.crypt(truncated_prehashed_key_part, stored_key_hash) THEN
         -- Get the authenticated user ID
         authenticated_user_id := auth.uid ();
         -- If the user is already authenticated, ensure the key belongs to them
