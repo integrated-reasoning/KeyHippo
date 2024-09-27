@@ -82,7 +82,7 @@ CREATE OR REPLACE FUNCTION keyhippo.random_prefix ()
         --
 $$;
 
--- Function to create an API key with a random prefix
+-- Function to create an API key
 CREATE OR REPLACE FUNCTION keyhippo.create_api_key (key_description text)
     RETURNS TABLE (
         api_key text,
@@ -97,8 +97,6 @@ DECLARE
     new_api_key_id uuid;
     authenticated_user_id uuid;
     prefix text;
-    prehashed_key text;
-    truncated_prehashed_key text;
 BEGIN
     -- Get the authenticated user ID
     authenticated_user_id := auth.uid ();
@@ -112,7 +110,7 @@ BEGIN
     END IF;
     -- Generate 64 bytes of random data for the API key
     random_bytes := extensions.gen_random_bytes(64);
-    -- Generate SHA512 hash of the random bytes and encode as hex (128 characters)
+    -- Generate SHA-512 hash of the random bytes and encode as hex (128 characters)
     new_api_key := encode(extensions.digest(random_bytes, 'sha512'), 'hex');
     -- Generate a new UUID for the API key
     new_api_key_id := extensions.gen_random_uuid ();
@@ -126,13 +124,9 @@ BEGIN
         WHEN unique_violation THEN
             RAISE EXCEPTION '[KeyHippo] Prefix collision occurred, unable to insert API key metadata';
     END;
-    -- Pre-hash the new_api_key using SHA-512 and base64 encode it to prevent null byte bcrypt issues
-    prehashed_key := encode(extensions.digest(new_api_key, 'sha512'), 'base64');
-    -- Truncate the base64-encoded string to 72 characters to fit bcrypt's limit
-    truncated_prehashed_key := substring(prehashed_key, 1, 72);
-    -- Store the hashed key in the secrets table using bcrypt
+    -- Store the SHA-512 hash of the API key in the secrets table
     INSERT INTO keyhippo.api_key_secrets (key_metadata_id, key_hash)
-        VALUES (new_api_key_id, extensions.crypt(truncated_prehashed_key, extensions.gen_salt('bf', 9)));
+        VALUES (new_api_key_id, encode(extensions.digest(new_api_key, 'sha512'), 'hex'));
     -- Return the concatenated API key (prefix + key) and its ID
     RETURN QUERY
     SELECT
@@ -158,10 +152,9 @@ DECLARE
     prefix_part text;
     key_part text;
     stored_key_hash text;
-    prehashed_key_part text;
-    truncated_prehashed_key_part text;
+    computed_hash text;
 BEGIN
-    -- Ensure the API key is long enough to contain the key part (128 characters for SHA512 hex)
+    -- Ensure the API key is long enough to contain the key part (128 characters for SHA-512 hex)
     IF LENGTH(api_key) <= 128 THEN
         RAISE EXCEPTION 'Invalid API key format';
     END IF;
@@ -172,7 +165,7 @@ BEGIN
     key_part :=
     RIGHT (api_key,
         128);
-    -- Step 1: Retrieve the metadata using the prefix
+    -- Retrieve the metadata using the prefix
     SELECT
         m.user_id,
         m.id,
@@ -190,22 +183,20 @@ BEGIN
     IF verified_user_id IS NULL OR NOT is_valid THEN
         RETURN NULL;
     END IF;
-    -- Step 2: Retrieve the hashed key from secrets
+    -- Retrieve the stored hash from secrets
     SELECT
         key_hash INTO stored_key_hash
     FROM
         keyhippo.api_key_secrets s
     WHERE
         s.key_metadata_id = metadata_id;
-    -- Pre-hash the new_api_key using SHA-512 and base64 encode it to prevent null byte bcrypt issues
-    prehashed_key_part := encode(extensions.digest(key_part, 'sha512'), 'base64');
-    -- Truncate the base64-encoded string to 72 characters to fit bcrypt's limit
-    truncated_prehashed_key_part := substring(prehashed_key_part, 1, 72);
-    -- Verify the key using bcrypt
-    IF stored_key_hash = extensions.crypt(truncated_prehashed_key_part, stored_key_hash) THEN
+    -- Compute the SHA-512 hash of the provided key part
+    computed_hash := encode(extensions.digest(key_part, 'sha512'), 'hex');
+    -- Verify the key by comparing the computed hash with the stored hash
+    IF computed_hash = stored_key_hash THEN
         -- Get the authenticated user ID
         authenticated_user_id := auth.uid ();
-        -- If the user is already authenticated, ensure the key belongs to them
+        -- Ensure the key belongs to the authenticated user if they are logged in
         IF authenticated_user_id IS NOT NULL AND authenticated_user_id != verified_user_id THEN
             RAISE EXCEPTION 'Unauthorized: Authenticated user % does not own this key', authenticated_user_id;
         END IF;
