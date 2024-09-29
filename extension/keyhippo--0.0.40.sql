@@ -40,7 +40,7 @@ CREATE TABLE keyhippo.api_key_metadata (
     prefix text NOT NULL UNIQUE,
     created_at timestamptz NOT NULL DEFAULT now(),
     last_used_at timestamptz,
-    expires_at timestamptz NOT NULL DEFAULT (now() + interval '90 days'),
+    expires_at timestamptz NOT NULL DEFAULT (now() + interval '100 years'),
     is_revoked boolean NOT NULL DEFAULT FALSE
 );
 
