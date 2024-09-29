@@ -277,7 +277,6 @@ describe("KeyHippo Client Tests", () => {
     expect(keySummaries.length).toBeGreaterThanOrEqual(1);
   });
 
-  /*
   it("should reject API keys that exceed the maximum allowed size", async () => {
     // TODO: Write similar tests for all text fields including RBAC, ABAC metadata
     const oversizedKeyDescription = "A".repeat(5000); // Simulating an oversized key
@@ -285,10 +284,9 @@ describe("KeyHippo Client Tests", () => {
     // Attempt to create an oversized API key
     await expect(
       testSetup.keyHippo.createApiKey(
-        testSetup.userId,
         oversizedKeyDescription,
       ),
-    ).rejects.toThrow("API key size exceeds the allowed limit");
+    ).rejects.toThrow("Failed to create API key: Error: Create API key RPC failed: [KeyHippo] Invalid key description");
   });
 
   it("should reject tampered API keys", async () => {
@@ -296,7 +294,6 @@ describe("KeyHippo Client Tests", () => {
 
     // Create an API key
     const createdKeyInfo = await testSetup.keyHippo.createApiKey(
-      testSetup.userId,
       keyDescription,
     );
 
@@ -306,141 +303,11 @@ describe("KeyHippo Client Tests", () => {
     // Attempt to authenticate using the tampered key
     const mockHeaders = new Headers({ Authorization: `Bearer ${tamperedKey}` });
     await expect(testSetup.keyHippo.authenticate(mockHeaders)).rejects.toThrow(
-      "Invalid API key",
+      "API key does not correspond to any user.",
     );
   });
 
-  it("should prevent creating API keys for other users without authorization", async () => {
-    const unauthorizedUserId = "99999999-9999-9999-9999-999999999999";
-
-    // Attempt to create an API key for another user
-    await expect(
-      testSetup.keyHippo.createApiKey(unauthorizedUserId, "Unauthorized Key"),
-    ).rejects.toThrow("Unauthorized to create key for user");
-  });
-
-  it("should not log API keys in plaintext", async () => {
-    const keyDescription = "Log Leakage Test Key";
-
-    // Create an API key and check the logs
-    const createdKeyInfo = await testSetup.keyHippo.createApiKey(
-      testSetup.userId,
-      keyDescription,
-    );
-
-    // Check the log output for accidental leakage
-    const logs = await testSetup.getLogs();
-
-    expect(logs).not.toContain(createdKeyInfo.apiKey);
-  });
-
-  it("should prevent privilege escalation using API key", async () => {
-    const keyDescription = "Privilege Escalation Key";
-
-    // Create a low-privileged API key
-    const lowPrivKey = await testSetup.keyHippo.createApiKey(
-      testSetup.userId,
-      keyDescription,
-      { privilegeLevel: "low" },
-    );
-
-    // Attempt to perform a high-privilege action
-    await expect(
-      testSetup.keyHippo.performAdminAction(lowPrivKey.apiKey),
-    ).rejects.toThrow("Insufficient privileges");
-  });
-
-  it("should prevent replaying API key creation requests", async () => {
-    const keyDescription = "Replay Attack Test Key";
-
-    // Record the request details
-    const request = {
-      userId: testSetup.userId,
-      description: keyDescription,
-    };
-
-    // Create the API key
-    const keyInfo = await testSetup.keyHippo.createApiKey(
-      request.userId,
-      request.description,
-    );
-    expect(keyInfo).toHaveProperty("id");
-
-    // Attempt to replay the same request
-    await expect(
-      testSetup.keyHippo.createApiKey(request.userId, request.description),
-    ).rejects.toThrow("Duplicate request detected");
-  });
-
-  it("should enforce rate limiting on API key creation", async () => {
-    const keyDescription = "Rate Limiting Test Key";
-
-    // Try to create multiple API keys in quick succession
-    for (let i = 0; i < 10; i++) {
-      await testSetup.keyHippo.createApiKey(
-        testSetup.userId,
-        `${keyDescription} ${i}`,
-      );
-    }
-
-    // Expect rate limit error on the 11th attempt
-    await expect(
-      testSetup.keyHippo.createApiKey(testSetup.userId, "Excess Key"),
-    ).rejects.toThrow("Rate limit exceeded");
-  });
-
-  it("should reject access to API keys without Authorization header", async () => {
-    const keyDescription = "Unauthorized Access Key";
-
-    const createdKeyInfo = await testSetup.keyHippo.createApiKey(
-      testSetup.userId,
-      keyDescription,
-    );
-
-    // Attempt to authenticate without Authorization header
-    await expect(
-      testSetup.keyHippo.authenticate(new Headers({})),
-    ).rejects.toThrow("Unauthorized");
-  });
-
-  it("should not authenticate with an expired API key", async () => {
-    const keyDescription = "Expiring Key";
-
-    // Create an API key with an expiration time of 1 second
-    const createdKeyInfo = await testSetup.keyHippo.createApiKey(
-      testSetup.userId,
-      keyDescription,
-      { expiresIn: 1 }, // TODO: make this configurable
-    );
-
-    // Wait for the key to expire
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-
-    // Attempt to authenticate using the expired key
-    const mockHeaders = new Headers({
-      Authorization: `Bearer ${createdKeyInfo.apiKey}`,
-    });
-    await expect(testSetup.keyHippo.authenticate(mockHeaders)).rejects.toThrow(
-      "Unauthorized",
-    );
-  });
-
-  it("should fail to create more API keys if the user exceeds the maximum limit", async () => {
-    const maxKeys = 5; // TODO implement this as a constraint
-
-    // Create the maximum number of API keys
-    for (let i = 0; i < maxKeys; i++) {
-      await testSetup.keyHippo.createApiKey(testSetup.userId, `Test Key ${i}`);
-    }
-
-    // Attempt to create one more key
-    await expect(
-      testSetup.keyHippo.createApiKey(testSetup.userId, "Excess Key"),
-    ).rejects.toThrow("API key limit exceeded");
-  });
-  */
-
- /*
+    /*
   describe("KeyHippo Client RBAC and ABAC Tests", () => {
     it("should add user to a group with a role (RBAC)", async () => {
       const groupId = testSetup.adminGroupId;
