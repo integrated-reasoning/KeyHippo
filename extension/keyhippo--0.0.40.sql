@@ -29,13 +29,77 @@
 -- Create the necessary schemas
 CREATE SCHEMA IF NOT EXISTS keyhippo;
 
+CREATE SCHEMA IF NOT EXISTS keyhippo_rbac;
+
+CREATE SCHEMA IF NOT EXISTS keyhippo_abac;
+
 -- Ensure required extensions are installed
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Create the api_key_metadata table
+-- Create RBAC tables
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.groups (
+    id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid (),
+    name text UNIQUE NOT NULL,
+    description text
+);
+
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.roles (
+    id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid (),
+    name text NOT NULL,
+    description text,
+    group_id uuid NOT NULL REFERENCES keyhippo_rbac.groups (id) ON DELETE CASCADE,
+    parent_role_id uuid REFERENCES keyhippo_rbac.roles (id) ON DELETE SET NULL,
+    UNIQUE (name, group_id)
+);
+
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.permissions (
+    id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid (),
+    name text UNIQUE NOT NULL,
+    description text
+);
+
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.role_permissions (
+    role_id uuid NOT NULL REFERENCES keyhippo_rbac.roles (id) ON DELETE CASCADE,
+    permission_id uuid NOT NULL REFERENCES keyhippo_rbac.permissions (id) ON DELETE CASCADE,
+    PRIMARY KEY (role_id, permission_id)
+);
+
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.user_group_roles (
+    user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+    group_id uuid NOT NULL REFERENCES keyhippo_rbac.groups (id) ON DELETE CASCADE,
+    role_id uuid NOT NULL REFERENCES keyhippo_rbac.roles (id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id, role_id)
+);
+
+CREATE TABLE IF NOT EXISTS keyhippo_rbac.claims_cache (
+    user_id uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
+    rbac_claims jsonb DEFAULT '{}' ::jsonb
+);
+
+-- Create ABAC tables
+CREATE TABLE IF NOT EXISTS keyhippo_abac.user_attributes (
+    user_id uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
+    attributes jsonb DEFAULT '{}' ::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS keyhippo_abac.policies (
+    id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid (),
+    name text UNIQUE NOT NULL,
+    description text,
+    policy jsonb NOT NULL
+);
+
+-- Create KeyHippo tables
+CREATE TABLE keyhippo.scopes (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    name text NOT NULL UNIQUE,
+    description text
+);
+
 CREATE TABLE keyhippo.api_key_metadata (
     id uuid PRIMARY KEY,
     user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+    scope_id uuid REFERENCES keyhippo.scopes (id),
     description text,
     prefix text NOT NULL UNIQUE,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -44,14 +108,24 @@ CREATE TABLE keyhippo.api_key_metadata (
     is_revoked boolean NOT NULL DEFAULT FALSE
 );
 
--- Indexes for faster lookups
-CREATE INDEX idx_api_key_metadata_user_id ON keyhippo.api_key_metadata (user_id);
+CREATE TABLE keyhippo.group_permissions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    group_id uuid NOT NULL REFERENCES keyhippo_rbac.groups (id),
+    permission_id uuid NOT NULL REFERENCES keyhippo_rbac.permissions (id),
+    UNIQUE (group_id, permission_id)
+);
 
--- Create the api_key_secrets table (not accessible by the user)
 CREATE TABLE keyhippo.api_key_secrets (
     key_metadata_id uuid PRIMARY KEY REFERENCES keyhippo.api_key_metadata (id) ON DELETE CASCADE,
     key_hash text NOT NULL
 );
+
+-- Create indexes
+CREATE INDEX idx_api_key_metadata_user_id ON keyhippo.api_key_metadata (user_id);
+
+CREATE INDEX IF NOT EXISTS idx_user_attributes_gin ON keyhippo_abac.user_attributes USING gin (attributes);
+
+CREATE INDEX IF NOT EXISTS idx_claims_cache_gin ON keyhippo_rbac.claims_cache USING gin (rbac_claims);
 
 CREATE OR REPLACE FUNCTION keyhippo.random_prefix ()
     RETURNS text
@@ -83,7 +157,7 @@ CREATE OR REPLACE FUNCTION keyhippo.random_prefix ()
 $$;
 
 -- Function to create an API key
-CREATE OR REPLACE FUNCTION keyhippo.create_api_key (key_description text)
+CREATE OR REPLACE FUNCTION keyhippo.create_api_key (key_description text, scope_name text DEFAULT NULL)
     RETURNS TABLE (
         api_key text,
         api_key_id uuid)
@@ -97,6 +171,7 @@ DECLARE
     new_api_key_id uuid;
     authenticated_user_id uuid;
     prefix text;
+    scope_id uuid;
 BEGIN
     -- Get the authenticated user ID
     authenticated_user_id := auth.uid ();
@@ -108,6 +183,22 @@ BEGIN
     IF LENGTH(key_description) > 255 OR key_description !~ '^[a-zA-Z0-9_ \-]*$' THEN
         RAISE EXCEPTION '[KeyHippo] Invalid key description';
     END IF;
+    -- Handle scope
+    IF scope_name IS NULL THEN
+        -- Default to user-specific scope
+        scope_id := NULL;
+    ELSE
+        -- Get the scope_id for the provided scope_name
+        SELECT
+            id INTO scope_id
+        FROM
+            keyhippo.scopes
+        WHERE
+            name = scope_name;
+        IF scope_id IS NULL THEN
+            RAISE EXCEPTION '[KeyHippo] Invalid scope';
+        END IF;
+    END IF;
     -- Generate 64 bytes of random data for the API key
     random_bytes := extensions.gen_random_bytes(64);
     -- Generate SHA-512 hash of the random bytes and encode as hex (128 characters)
@@ -118,8 +209,8 @@ BEGIN
     prefix := keyhippo.random_prefix ();
     -- Attempt to insert the metadata with the unique prefix
     BEGIN
-        INSERT INTO keyhippo.api_key_metadata (id, user_id, description, prefix)
-            VALUES (new_api_key_id, authenticated_user_id, key_description, prefix);
+        INSERT INTO keyhippo.api_key_metadata (id, user_id, description, prefix, scope_id)
+            VALUES (new_api_key_id, authenticated_user_id, key_description, prefix, scope_id);
     EXCEPTION
         WHEN unique_violation THEN
             RAISE EXCEPTION '[KeyHippo] Prefix collision occurred, unable to insert API key metadata';
@@ -138,21 +229,22 @@ $$;
 
 -- Function to verify an API key
 CREATE OR REPLACE FUNCTION keyhippo.verify_api_key (api_key text)
-    RETURNS uuid
+    RETURNS TABLE (
+        user_id uuid,
+        scope_id uuid,
+        permissions text[])
     LANGUAGE plpgsql
     SECURITY DEFINER
     SET search_path = pg_temp
     AS $$
 DECLARE
-    verified_user_id uuid;
-    authenticated_user_id uuid;
     metadata_id uuid;
-    current_last_used timestamptz;
-    is_valid boolean;
     prefix_part text;
     key_part text;
     stored_key_hash text;
     computed_hash text;
+    v_user_id uuid;
+    v_scope_id uuid;
 BEGIN
     -- Ensure the API key is long enough to contain the key part (128 characters for SHA-512 hex)
     IF LENGTH(api_key) <= 128 THEN
@@ -167,21 +259,20 @@ BEGIN
         128);
     -- Retrieve the metadata using the prefix
     SELECT
-        m.user_id,
         m.id,
-        m.last_used_at,
-        (NOT m.is_revoked
-            AND m.expires_at > NOW()) AS valid INTO verified_user_id,
-        metadata_id,
-        current_last_used,
-        is_valid
+        m.user_id,
+        m.scope_id INTO metadata_id,
+        v_user_id,
+        v_scope_id
     FROM
         keyhippo.api_key_metadata m
     WHERE
-        m.prefix = prefix_part;
+        m.prefix = prefix_part
+        AND NOT m.is_revoked
+        AND m.expires_at > NOW();
     -- If no metadata found or not valid, return NULL
-    IF verified_user_id IS NULL OR NOT is_valid THEN
-        RETURN NULL;
+    IF metadata_id IS NULL THEN
+        RETURN;
     END IF;
     -- Retrieve the stored hash from secrets
     SELECT
@@ -194,55 +285,82 @@ BEGIN
     computed_hash := encode(extensions.digest(key_part, 'sha512'), 'hex');
     -- Verify the key by comparing the computed hash with the stored hash
     IF computed_hash = stored_key_hash THEN
-        -- Get the authenticated user ID
-        authenticated_user_id := auth.uid ();
-        -- Ensure the key belongs to the authenticated user if they are logged in
-        IF authenticated_user_id IS NOT NULL AND authenticated_user_id != verified_user_id THEN
-            RAISE EXCEPTION 'Unauthorized: Authenticated user % does not own this key', authenticated_user_id;
-        END IF;
         -- Update last_used_at if necessary
-        IF current_last_used IS NULL OR current_last_used < NOW() - INTERVAL '1 minute' THEN
-            BEGIN
-                UPDATE
-                    keyhippo.api_key_metadata
-                SET
-                    last_used_at = NOW()
-                WHERE
-                    id = metadata_id;
-            EXCEPTION
-                WHEN read_only_sql_transaction THEN
-                    -- Handle read-only transaction error
-                    RAISE NOTICE 'Could not update last_used_at in read-only transaction';
-            END;
-        END IF;
-    RETURN verified_user_id;
-ELSE
-    RETURN NULL;
+        UPDATE
+            keyhippo.api_key_metadata
+        SET
+            last_used_at = NOW()
+        WHERE
+            id = metadata_id
+            AND (last_used_at IS NULL
+                OR last_used_at < NOW() - INTERVAL '1 minute');
+        -- Return user_id, scope_id, and permissions
+        RETURN QUERY
+        SELECT
+            v_user_id,
+            v_scope_id,
+            ARRAY_AGG(DISTINCT p.name)::text[]
+        FROM
+            keyhippo_rbac.user_group_roles ugr
+            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+        WHERE
+            ugr.user_id = v_user_id;
     END IF;
 END;
-
 $$;
 
--- Function to get user_id from API key or JWT
-CREATE OR REPLACE FUNCTION keyhippo.current_user_id ()
-    RETURNS uuid
+CREATE OR REPLACE FUNCTION keyhippo.key_has_permission (api_key text, required_permission text)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_temp
+    AS $$
+DECLARE
+    key_permissions text[];
+BEGIN
+    SELECT
+        permissions INTO key_permissions
+    FROM
+        keyhippo.verify_api_key (api_key);
+    RETURN required_permission = ANY (key_permissions);
+END;
+$$;
+
+-- Function to get user_id and scope from API key or JWT
+CREATE OR REPLACE FUNCTION keyhippo.current_user_context ()
+    RETURNS TABLE (
+        user_id uuid,
+        scope_id uuid)
     LANGUAGE plpgsql
     SECURITY INVOKER
     SET search_path = pg_temp
     AS $$
 DECLARE
     api_key text;
-    user_id uuid;
+    v_user_id uuid;
+    v_scope_id uuid;
 BEGIN
     api_key := current_setting('request.headers', TRUE)::json ->> 'x-api-key';
     IF api_key IS NOT NULL THEN
         SELECT
-            keyhippo.verify_api_key (api_key) INTO user_id;
-        IF user_id IS NOT NULL THEN
-            RETURN user_id;
+            user_id,
+            scope_id INTO v_user_id,
+            v_scope_id
+        FROM
+            keyhippo.verify_api_key (api_key);
+        IF v_user_id IS NOT NULL THEN
+            RETURN QUERY
+            SELECT
+                v_user_id,
+                v_scope_id;
+            RETURN;
         END IF;
     END IF;
-    RETURN auth.uid ();
+    RETURN QUERY
+    SELECT
+        auth.uid (),
+        NULL::uuid;
 END;
 $$;
 
@@ -255,19 +373,29 @@ CREATE OR REPLACE FUNCTION keyhippo.revoke_api_key (api_key_id uuid)
     AS $$
 DECLARE
     success boolean;
-    c_user_id uuid := keyhippo.current_user_id ();
+    c_user_id uuid;
+    c_scope_id uuid;
 BEGIN
+    SELECT
+        user_id,
+        scope_id INTO c_user_id,
+        c_scope_id
+    FROM
+        keyhippo.current_user_context ();
     IF c_user_id IS NULL THEN
         RAISE EXCEPTION 'Unauthorized';
     END IF;
     -- Update to set is_revoked only if it's not already revoked
+    -- and the user has permission (either they created the key or it's within their scope)
     UPDATE
         keyhippo.api_key_metadata
     SET
         is_revoked = TRUE
     WHERE
         id = api_key_id
-        AND user_id = c_user_id
+        AND ((user_id = c_user_id
+                AND scope_id IS NULL)
+            OR (scope_id = c_scope_id))
         AND is_revoked = FALSE
     RETURNING
         TRUE INTO success;
@@ -290,20 +418,32 @@ CREATE OR REPLACE FUNCTION keyhippo.rotate_api_key (old_api_key_id uuid)
     SET search_path = pg_temp
     AS $$
 DECLARE
-    c_user_id uuid := auth.uid ();
+    c_user_id uuid;
+    c_scope_id uuid;
     key_description text;
+    key_scope_id uuid;
 BEGIN
+    SELECT
+        user_id,
+        scope_id INTO c_user_id,
+        c_scope_id
+    FROM
+        keyhippo.current_user_context ();
     IF c_user_id IS NULL THEN
         RAISE EXCEPTION 'Unauthorized: User not authenticated';
     END IF;
-    -- Retrieve the description and ensure the key is not revoked
+    -- Retrieve the description and scope, and ensure the key is not revoked
     SELECT
-        ak.description INTO key_description
+        ak.description,
+        ak.scope_id INTO key_description,
+        key_scope_id
     FROM
         keyhippo.api_key_metadata ak
     WHERE
         ak.id = old_api_key_id
-        AND ak.user_id = c_user_id
+        AND ((ak.user_id = c_user_id
+                AND ak.scope_id IS NULL)
+            OR (ak.scope_id = c_scope_id))
         AND ak.is_revoked = FALSE;
     IF key_description IS NULL THEN
         RAISE EXCEPTION 'Unauthorized: Invalid or inactive API key';
@@ -311,12 +451,17 @@ BEGIN
     -- Revoke the old key
     PERFORM
         keyhippo.revoke_api_key (old_api_key_id);
-    -- Create a new key with the same description
+    -- Create a new key with the same description and scope
     RETURN QUERY
     SELECT
         *
     FROM
-        keyhippo.create_api_key (key_description);
+        keyhippo.create_api_key (key_description, (
+                SELECT
+                    name
+                FROM keyhippo.scopes
+                WHERE
+                    id = key_scope_id));
 END;
 $$;
 
@@ -330,13 +475,21 @@ CREATE OR REPLACE FUNCTION keyhippo.check_request ()
 DECLARE
     req_api_key text := current_setting('request.header.x-api-key', TRUE);
     verified_user_id uuid;
+    verified_scope_id uuid;
+    verified_permissions text[];
 BEGIN
     IF req_api_key IS NULL THEN
         -- No API key provided, continue with normal auth
         RETURN;
     END IF;
-    -- Use the existing verify_api_key function
-    verified_user_id := keyhippo.verify_api_key (req_api_key);
+    SELECT
+        user_id,
+        scope_id,
+        permissions INTO verified_user_id,
+        verified_scope_id,
+        verified_permissions
+    FROM
+        keyhippo.verify_api_key (req_api_key);
     IF verified_user_id IS NULL THEN
         -- No valid API key found, raise an error
         RAISE EXCEPTION 'Invalid API key provided in x-api-key header.';
@@ -344,12 +497,16 @@ BEGIN
         -- Set the user context for RLS policies
         PERFORM
             set_config('request.jwt.claim.sub', verified_user_id::text, TRUE);
+        PERFORM
+            set_config('request.jwt.claim.scope', verified_scope_id::text, TRUE);
+        PERFORM
+            set_config('request.jwt.claim.permissions', array_to_json(verified_permissions)::text, TRUE);
     END IF;
 END;
 $$;
 
 -- Grant necessary permissions
-GRANT EXECUTE ON FUNCTION keyhippo.create_api_key (text) TO authenticated;
+GRANT EXECUTE ON FUNCTION keyhippo.create_api_key (text, text) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo.verify_api_key (text) TO authenticated;
 
@@ -359,6 +516,8 @@ GRANT EXECUTE ON FUNCTION keyhippo.rotate_api_key (uuid) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo.check_request () TO authenticated, authenticator, service_role, anon;
 
+GRANT EXECUTE ON FUNCTION keyhippo.current_user_context () TO authenticated, authenticator, service_role, anon;
+
 ALTER ROLE authenticator SET pgrst.db_pre_request = 'keyhippo.check_request';
 
 GRANT EXECUTE ON FUNCTION auth.uid () TO authenticated;
@@ -367,21 +526,33 @@ GRANT USAGE ON SCHEMA keyhippo TO authenticated, authenticator, service_role, an
 
 GRANT SELECT ON TABLE keyhippo.api_key_metadata TO authenticated, authenticator, anon;
 
+GRANT SELECT ON TABLE keyhippo.scopes TO authenticated, authenticator, anon;
+
 -- Secure the api_key_secrets table
 REVOKE ALL ON keyhippo.api_key_secrets FROM PUBLIC;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo.api_key_secrets TO service_role;
 
--- Enable Row Level Security on keyhippo.api_key_metadata
+-- Enable Row Level Security on keyhippo tables
 ALTER TABLE keyhippo.api_key_metadata ENABLE ROW LEVEL SECURITY;
 
--- Enable Row Level Security on keyhippo.api_key_secrets
 ALTER TABLE keyhippo.api_key_secrets ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE keyhippo.scopes ENABLE ROW LEVEL SECURITY;
 
 -- Create RLS policy for api_key_metadata
 CREATE POLICY api_key_metadata_policy ON keyhippo.api_key_metadata
     FOR ALL TO authenticated
-        USING (user_id = keyhippo.current_user_id ());
+        USING ((user_id, scope_id) IN (
+            SELECT
+                user_id, scope_id
+            FROM
+                keyhippo.current_user_context ())
+                OR (user_id = (
+                    SELECT
+                        user_id
+                    FROM
+                        keyhippo.current_user_context ()) AND scope_id IS NULL));
 
 -- Create RLS policy for api_key_secrets to deny all access
 CREATE POLICY no_access ON keyhippo.api_key_secrets
@@ -389,22 +560,47 @@ CREATE POLICY no_access ON keyhippo.api_key_secrets
         USING (FALSE);
 
 -- Create RLS policies for keyhippo.api_key_metadata
-CREATE POLICY "Users can only view their own API keys" ON keyhippo.api_key_metadata
-    FOR ALL
-        USING (user_id = keyhippo.current_user_id ());
+CREATE POLICY "Users can view their own or in-scope API keys" ON keyhippo.api_key_metadata
+    FOR SELECT
+        USING ((user_id, scope_id) IN (
+            SELECT
+                user_id, scope_id
+            FROM
+                keyhippo.current_user_context ())
+                OR (user_id = (
+                    SELECT
+                        user_id
+                    FROM
+                        keyhippo.current_user_context ()) AND scope_id IS NULL));
 
 CREATE POLICY "Allow user to insert their own API keys" ON keyhippo.api_key_metadata
     FOR INSERT
-        WITH CHECK (user_id = keyhippo.current_user_id ());
+        WITH CHECK (user_id = (
+            SELECT
+                user_id
+            FROM
+                keyhippo.current_user_context ()));
 
-CREATE POLICY "Allow user to select their own API keys" ON keyhippo.api_key_metadata
-    FOR SELECT
-        USING (user_id = keyhippo.current_user_id ());
-
-CREATE POLICY "Allow user to update their own API keys" ON keyhippo.api_key_metadata
+CREATE POLICY "Allow user to update their own or in-scope API keys" ON keyhippo.api_key_metadata
     FOR UPDATE
-        USING (user_id = keyhippo.current_user_id ())
-        WITH CHECK (user_id = keyhippo.current_user_id ());
+        USING ((user_id, scope_id) IN (
+            SELECT
+                user_id, scope_id
+            FROM
+                keyhippo.current_user_context ())
+                OR (user_id = (
+                    SELECT
+                        user_id
+                    FROM
+                        keyhippo.current_user_context ()) AND scope_id IS NULL)) WITH CHECK (user_id = (
+            SELECT
+                user_id
+            FROM keyhippo.current_user_context ()));
+
+-- Create RLS policy for scopes
+CREATE POLICY "Allow all authenticated users to view scopes" ON keyhippo.scopes
+    FOR SELECT TO authenticated
+        USING (TRUE);
 
 -- Ensure that only necessary roles have access to the keyhippo schema
 REVOKE ALL ON ALL TABLES IN SCHEMA keyhippo FROM PUBLIC;
@@ -418,77 +614,6 @@ NOTIFY pgrst,
 -- ================================================================
 -- RBAC + ABAC Implementation
 -- ================================================================
--- Create RBAC Schema
-CREATE SCHEMA IF NOT EXISTS keyhippo_rbac;
-
--- Create ABAC Schema
-CREATE SCHEMA IF NOT EXISTS keyhippo_abac;
-
--- -------------------------------
--- RBAC Tables
--- -------------------------------
--- Create Groups Table
-CREATE TABLE IF NOT EXISTS keyhippo_rbac.groups (
-    id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid (),
-    name text UNIQUE NOT NULL,
-    description text
-);
-
--- Create Roles Table
-CREATE TABLE IF NOT EXISTS keyhippo_rbac.roles (
-    id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid (),
-    name text NOT NULL,
-    description text,
-    group_id uuid NOT NULL REFERENCES keyhippo_rbac.groups (id) ON DELETE CASCADE,
-    parent_role_id uuid REFERENCES keyhippo_rbac.roles (id) ON DELETE SET NULL,
-    UNIQUE (name, group_id)
-);
-
--- Create Permissions Table
-CREATE TABLE IF NOT EXISTS keyhippo_rbac.permissions (
-    id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid (),
-    name text UNIQUE NOT NULL,
-    description text
-);
-
--- Create Role-Permissions Mapping Table
-CREATE TABLE IF NOT EXISTS keyhippo_rbac.role_permissions (
-    role_id uuid NOT NULL REFERENCES keyhippo_rbac.roles (id) ON DELETE CASCADE,
-    permission_id uuid NOT NULL REFERENCES keyhippo_rbac.permissions (id) ON DELETE CASCADE,
-    PRIMARY KEY (role_id, permission_id)
-);
-
--- Create User-Group-Roles Mapping Table
-CREATE TABLE IF NOT EXISTS keyhippo_rbac.user_group_roles (
-    user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
-    group_id uuid NOT NULL REFERENCES keyhippo_rbac.groups (id) ON DELETE CASCADE,
-    role_id uuid NOT NULL REFERENCES keyhippo_rbac.roles (id) ON DELETE CASCADE,
-    PRIMARY KEY (user_id, group_id, role_id)
-);
-
--- Create Claims Cache Table
-CREATE TABLE IF NOT EXISTS keyhippo_rbac.claims_cache (
-    user_id uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
-    rbac_claims jsonb DEFAULT '{}' ::jsonb
-);
-
--- -------------------------------
--- ABAC Tables
--- -------------------------------
--- Create User Attributes Table (ABAC)
-CREATE TABLE IF NOT EXISTS keyhippo_abac.user_attributes (
-    user_id uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
-    attributes jsonb DEFAULT '{}' ::jsonb
-);
-
--- Create Policies Table (ABAC)
-CREATE TABLE IF NOT EXISTS keyhippo_abac.policies (
-    id uuid PRIMARY KEY DEFAULT extensions.gen_random_uuid (),
-    name text UNIQUE NOT NULL,
-    description text,
-    policy jsonb NOT NULL
-);
-
 -- -------------------------------
 -- RBAC Functions
 -- -------------------------------
@@ -501,7 +626,30 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.assign_role_to_user (p_user_id uuid, p_
     AS $$
 DECLARE
     v_role_id uuid;
+    v_current_user_id uuid;
+    v_current_scope_id uuid;
 BEGIN
+    -- Get the current user context
+    SELECT
+        user_id,
+        scope_id INTO v_current_user_id,
+        v_current_scope_id
+    FROM
+        keyhippo.current_user_context ();
+    -- Check if the current user has 'manage_roles' permission in the specified group
+    IF NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.user_group_roles ugr
+            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+        WHERE
+            ugr.user_id = v_current_user_id
+            AND ugr.group_id = p_group_id
+            AND p.name = 'manage_roles') THEN
+    RAISE EXCEPTION 'Unauthorized to assign roles in this group';
+END IF;
     -- Get the role ID
     SELECT
         id INTO v_role_id
@@ -579,12 +727,35 @@ CREATE OR REPLACE FUNCTION keyhippo_abac.set_user_attribute (p_user_id uuid, p_a
     SECURITY DEFINER
     SET search_path = pg_temp
     AS $$
+DECLARE
+    v_current_user_id uuid;
+    v_current_scope_id uuid;
 BEGIN
-    INSERT INTO keyhippo_abac.user_attributes (user_id, attributes)
-        VALUES (p_user_id, jsonb_build_object(p_attribute, p_value))
-    ON CONFLICT (user_id)
-        DO UPDATE SET
-            attributes = keyhippo_abac.user_attributes.attributes || jsonb_build_object(p_attribute, p_value);
+    -- Get the current user context
+    SELECT
+        user_id,
+        scope_id INTO v_current_user_id,
+        v_current_scope_id
+    FROM
+        keyhippo.current_user_context ();
+    -- Check if the current user has 'manage_user_attributes' permission in any group
+    IF NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.user_group_roles ugr
+            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+        WHERE
+            ugr.user_id = v_current_user_id
+            AND p.name = 'manage_user_attributes') THEN
+    RAISE EXCEPTION 'Unauthorized to set user attributes';
+END IF;
+INSERT INTO keyhippo_abac.user_attributes (user_id, attributes)
+    VALUES (p_user_id, jsonb_build_object(p_attribute, p_value))
+ON CONFLICT (user_id)
+    DO UPDATE SET
+        attributes = keyhippo_abac.user_attributes.attributes || jsonb_build_object(p_attribute, p_value);
 END;
 $$;
 
@@ -595,12 +766,35 @@ CREATE OR REPLACE FUNCTION keyhippo_abac.create_policy (p_name text, p_descripti
     SECURITY DEFINER
     SET search_path = pg_temp
     AS $$
+DECLARE
+    v_current_user_id uuid;
+    v_current_scope_id uuid;
 BEGIN
-    INSERT INTO keyhippo_abac.policies (name, description, POLICY)
-            VALUES (p_name, p_description, p_policy)
-        ON CONFLICT (name)
-            DO UPDATE SET
-                description = EXCLUDED.description, POLICY = EXCLUDED.policy;
+    -- Get the current user context
+    SELECT
+        user_id,
+        scope_id INTO v_current_user_id,
+        v_current_scope_id
+    FROM
+        keyhippo.current_user_context ();
+    -- Check if the current user has 'manage_policies' permission in any group
+    IF NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.user_group_roles ugr
+            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+        WHERE
+            ugr.user_id = v_current_user_id
+            AND p.name = 'manage_policies') THEN
+    RAISE EXCEPTION 'Unauthorized to create policies';
+END IF;
+INSERT INTO keyhippo_abac.policies (name, description, POLICY)
+        VALUES (p_name, p_description, p_policy)
+    ON CONFLICT (name)
+        DO UPDATE SET
+            description = EXCLUDED.description, POLICY = EXCLUDED.policy;
 END;
 $$;
 
@@ -612,28 +806,34 @@ CREATE OR REPLACE FUNCTION keyhippo_abac.check_abac_policy (p_user_id uuid, p_po
     SET search_path = pg_temp
     AS $$
 DECLARE
-    v_attribute_value jsonb;
-    v_policy_attribute text;
-    v_policy_value jsonb;
+    v_current_user_id uuid;
+    v_current_scope_id uuid;
 BEGIN
-    v_policy_attribute := p_policy ->> 'attribute';
-    v_policy_value := p_policy -> 'value';
+    -- Get the current user context
     SELECT
-        attributes -> v_policy_attribute INTO v_attribute_value
+        user_id,
+        scope_id INTO v_current_user_id,
+        v_current_scope_id
     FROM
-        keyhippo_abac.user_attributes
-    WHERE
-        user_id = p_user_id;
-    IF v_attribute_value IS NULL THEN
-        RETURN FALSE;
-    END IF;
-    RETURN CASE WHEN p_policy ->> 'type' = 'attribute_equals' THEN
-        v_attribute_value = v_policy_value
-    WHEN p_policy ->> 'type' = 'attribute_contains' THEN
-        v_attribute_value @> v_policy_value
-    ELSE
-        FALSE
-    END;
+        keyhippo.current_user_context ();
+    -- Check if the current user has 'manage_policies' permission in any group
+    IF NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.user_group_roles ugr
+            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+        WHERE
+            ugr.user_id = v_current_user_id
+            AND p.name = 'manage_policies') THEN
+    RAISE EXCEPTION 'Unauthorized to create policies';
+END IF;
+INSERT INTO keyhippo_abac.policies (name, description, POLICY)
+        VALUES (p_name, p_description, p_policy)
+    ON CONFLICT (name)
+        DO UPDATE SET
+            description = EXCLUDED.description, POLICY = EXCLUDED.policy;
 END;
 $$;
 
@@ -684,22 +884,76 @@ ALTER TABLE keyhippo_abac.policies ENABLE ROW LEVEL SECURITY;
 -- RBAC: User-Group-Roles Access Policy
 CREATE POLICY "rbac_user_group_roles_access" ON keyhippo_rbac.user_group_roles
     FOR ALL
-        USING (keyhippo.current_user_id () = user_id
-            OR CURRENT_ROLE = 'service_role')
-            WITH CHECK (CURRENT_ROLE = 'service_role');
+        USING ((
+            SELECT
+                user_id
+            FROM
+                keyhippo.current_user_context ()) = user_id
+                OR EXISTS (
+                    SELECT
+                        1
+                    FROM
+                        keyhippo_rbac.user_group_roles ugr
+                        JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+                        JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+                    WHERE
+                        ugr.user_id = (
+                            SELECT
+                                user_id
+                            FROM
+                                keyhippo.current_user_context ()) AND ugr.group_id = keyhippo_rbac.user_group_roles.group_id AND p.name = 'manage_roles')
+                                OR CURRENT_ROLE = 'service_role') WITH CHECK (CURRENT_ROLE = 'service_role');
 
 -- RBAC: Claims Cache Access Policy
 CREATE POLICY "rbac_claims_cache_access" ON keyhippo_rbac.claims_cache
     FOR SELECT
-        USING (keyhippo.current_user_id () = user_id
-            OR CURRENT_ROLE = 'service_role');
+        USING ((
+            SELECT
+                user_id
+            FROM
+                keyhippo.current_user_context ()) = user_id
+                OR CURRENT_ROLE = 'service_role');
 
 -- ABAC: User Attributes Access Policy
 CREATE POLICY "abac_user_attributes_access" ON keyhippo_abac.user_attributes
     FOR ALL
-        USING (keyhippo.current_user_id () = user_id
-            OR CURRENT_ROLE = 'service_role')
-            WITH CHECK (CURRENT_ROLE = 'service_role');
+        USING ((
+            SELECT
+                user_id
+            FROM
+                keyhippo.current_user_context ()) = user_id
+                OR EXISTS (
+                    SELECT
+                        1
+                    FROM
+                        keyhippo_rbac.user_group_roles ugr
+                        JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+                        JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+                    WHERE
+                        ugr.user_id = (
+                            SELECT
+                                user_id
+                            FROM
+                                keyhippo.current_user_context ()) AND p.name = 'manage_user_attributes')
+                                OR CURRENT_ROLE = 'service_role') WITH CHECK (CURRENT_ROLE = 'service_role');
+
+-- ABAC: Policies Access Policy
+CREATE POLICY "abac_policies_access" ON keyhippo_abac.policies
+    FOR ALL
+        USING (EXISTS (
+            SELECT
+                1
+            FROM
+                keyhippo_rbac.user_group_roles ugr
+                JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+                JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+            WHERE
+                ugr.user_id = (
+                    SELECT
+                        user_id
+                    FROM
+                        keyhippo.current_user_context ()) AND p.name = 'manage_policies')
+                        OR CURRENT_ROLE = 'service_role') WITH CHECK (CURRENT_ROLE = 'service_role');
 
 -- -------------------------------
 -- Permissions and Grants
@@ -733,84 +987,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo_rbac TO se
 
 -- Grant SELECT, INSERT, UPDATE, DELETE on all ABAC tables to service_role
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo_abac TO service_role;
-
--- -------------------------------
--- Indexes for Performance
--- -------------------------------
-CREATE INDEX IF NOT EXISTS idx_user_attributes_gin ON keyhippo_abac.user_attributes USING gin (attributes);
-
-CREATE INDEX IF NOT EXISTS idx_claims_cache_gin ON keyhippo_rbac.claims_cache USING gin (rbac_claims);
-
--- -------------------------------
--- Default Data Insertion
--- -------------------------------
--- Insert default groups
-INSERT INTO keyhippo_rbac.groups (name, description)
-    VALUES ('Admin Group', 'Group with administrative privileges'),
-    ('User Group', 'Group with standard user privileges')
-ON CONFLICT (name)
-    DO NOTHING;
-
--- Insert default roles
-INSERT INTO keyhippo_rbac.roles (name, description, group_id)
-SELECT
-    'Admin',
-    'Administrator Role',
-    id
-FROM
-    keyhippo_rbac.groups
-WHERE
-    name = 'Admin Group'
-ON CONFLICT (name,
-    group_id)
-    DO NOTHING;
-
-INSERT INTO keyhippo_rbac.roles (name, description, group_id)
-SELECT
-    'User',
-    'Standard User Role',
-    id
-FROM
-    keyhippo_rbac.groups
-WHERE
-    name = 'User Group'
-ON CONFLICT (name,
-    group_id)
-    DO NOTHING;
-
--- Insert default permissions
-INSERT INTO keyhippo_rbac.permissions (name, description)
-    VALUES ('read', 'Read Permission'),
-    ('write', 'Write Permission'),
-    ('delete', 'Delete Permission'),
-    ('manage_policies', 'Manage ABAC Policies')
-ON CONFLICT (name)
-    DO NOTHING;
-
--- Assign permissions to roles
-INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
-SELECT
-    r.id,
-    p.id
-FROM
-    keyhippo_rbac.roles r
-    CROSS JOIN keyhippo_rbac.permissions p
-WHERE
-    r.name = 'Admin'
-ON CONFLICT
-    DO NOTHING;
-
-INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
-SELECT
-    r.id,
-    p.id
-FROM
-    keyhippo_rbac.roles r
-    JOIN keyhippo_rbac.permissions p ON p.name IN ('read', 'write')
-WHERE
-    r.name = 'User'
-ON CONFLICT
-    DO NOTHING;
 
 -- -------------------------------
 -- Triggers
