@@ -96,6 +96,13 @@ CREATE TABLE keyhippo.scopes (
     description text
 );
 
+CREATE TABLE IF NOT EXISTS keyhippo.scope_permissions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    scope_id uuid NOT NULL REFERENCES keyhippo.scopes (id),
+    permission_id uuid NOT NULL REFERENCES keyhippo_rbac.permissions (id),
+    UNIQUE (scope_id, permission_id)
+);
+
 CREATE TABLE keyhippo.api_key_metadata (
     id uuid PRIMARY KEY,
     user_id uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
@@ -301,11 +308,14 @@ BEGIN
             v_scope_id,
             ARRAY_AGG(DISTINCT p.name)::text[]
         FROM
-            keyhippo_rbac.user_group_roles ugr
-            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-        WHERE
-            ugr.user_id = v_user_id;
+            keyhippo.api_key_metadata akm
+        LEFT JOIN keyhippo.scope_permissions sp ON akm.scope_id = sp.scope_id
+        LEFT JOIN keyhippo_rbac.permissions p ON sp.permission_id = p.id
+    WHERE
+        akm.id = metadata_id
+    GROUP BY
+        v_user_id,
+        v_scope_id;
     END IF;
 END;
 $$;
@@ -528,6 +538,8 @@ GRANT SELECT ON TABLE keyhippo.api_key_metadata TO authenticated, authenticator,
 
 GRANT SELECT ON TABLE keyhippo.scopes TO authenticated, authenticator, anon;
 
+GRANT SELECT ON TABLE keyhippo.scope_permissions TO authenticated, authenticator, anon;
+
 -- Secure the api_key_secrets table
 REVOKE ALL ON keyhippo.api_key_secrets FROM PUBLIC;
 
@@ -539,6 +551,8 @@ ALTER TABLE keyhippo.api_key_metadata ENABLE ROW LEVEL SECURITY;
 ALTER TABLE keyhippo.api_key_secrets ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE keyhippo.scopes ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE keyhippo.scope_permissions ENABLE ROW LEVEL SECURITY;
 
 -- Create RLS policy for api_key_metadata
 CREATE POLICY api_key_metadata_policy ON keyhippo.api_key_metadata
