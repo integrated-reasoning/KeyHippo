@@ -731,6 +731,32 @@ BEGIN
 END;
 $$;
 
+-- Function: user_has_permission
+CREATE OR REPLACE FUNCTION keyhippo_rbac.user_has_permission (permission_name text)
+    RETURNS boolean
+    AS $$
+DECLARE
+    current_user_id uuid;
+BEGIN
+    SELECT
+        user_id INTO current_user_id
+    FROM
+        keyhippo.current_user_context ();
+    RETURN EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.user_group_roles ugr
+            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+        WHERE
+            ugr.user_id = current_user_id
+            AND p.name = permission_name);
+END;
+$$
+LANGUAGE plpgsql
+SECURITY DEFINER;
+
 -- -------------------------------
 -- ABAC Functions
 -- -------------------------------
@@ -743,72 +769,21 @@ CREATE OR REPLACE FUNCTION keyhippo_abac.set_user_attribute (p_user_id uuid, p_a
     AS $$
 DECLARE
     v_current_user_id uuid;
-    v_current_scope_id uuid;
 BEGIN
     -- Get the current user context
     SELECT
-        user_id,
-        scope_id INTO v_current_user_id,
-        v_current_scope_id
+        user_id INTO v_current_user_id
     FROM
         keyhippo.current_user_context ();
     -- Check if the current user has 'manage_user_attributes' permission in any group
-    IF NOT EXISTS (
-        SELECT
-            1
-        FROM
-            keyhippo_rbac.user_group_roles ugr
-            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-        WHERE
-            ugr.user_id = v_current_user_id
-            AND p.name = 'manage_user_attributes') THEN
-    RAISE EXCEPTION 'Unauthorized to set user attributes';
-END IF;
-INSERT INTO keyhippo_abac.user_attributes (user_id, attributes)
-    VALUES (p_user_id, jsonb_build_object(p_attribute, p_value))
-ON CONFLICT (user_id)
-    DO UPDATE SET
-        attributes = keyhippo_abac.user_attributes.attributes || jsonb_build_object(p_attribute, p_value);
-END;
-$$;
-
--- Function: create_policy
-CREATE OR REPLACE FUNCTION keyhippo_abac.create_policy (p_name text, p_description text, p_policy jsonb)
-    RETURNS void
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    SET search_path = pg_temp
-    AS $$
-DECLARE
-    v_current_user_id uuid;
-    v_current_scope_id uuid;
-BEGIN
-    -- Get the current user context
-    SELECT
-        user_id,
-        scope_id INTO v_current_user_id,
-        v_current_scope_id
-    FROM
-        keyhippo.current_user_context ();
-    -- Check if the current user has 'manage_policies' permission in any group
-    IF NOT EXISTS (
-        SELECT
-            1
-        FROM
-            keyhippo_rbac.user_group_roles ugr
-            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-        WHERE
-            ugr.user_id = v_current_user_id
-            AND p.name = 'manage_policies') THEN
-    RAISE EXCEPTION 'Unauthorized to create policies';
-END IF;
-INSERT INTO keyhippo_abac.policies (name, description, POLICY)
-        VALUES (p_name, p_description, p_policy)
-    ON CONFLICT (name)
+    IF NOT keyhippo_rbac.user_has_permission ('manage_user_attributes') THEN
+        RAISE EXCEPTION 'Unauthorized to set user attributes';
+    END IF;
+    INSERT INTO keyhippo_abac.user_attributes (user_id, attributes)
+        VALUES (p_user_id, jsonb_build_object(p_attribute, p_value))
+    ON CONFLICT (user_id)
         DO UPDATE SET
-            description = EXCLUDED.description, POLICY = EXCLUDED.policy;
+            attributes = keyhippo_abac.user_attributes.attributes || jsonb_build_object(p_attribute, p_value);
 END;
 $$;
 
@@ -820,34 +795,31 @@ CREATE OR REPLACE FUNCTION keyhippo_abac.check_abac_policy (p_user_id uuid, p_po
     SET search_path = pg_temp
     AS $$
 DECLARE
-    v_current_user_id uuid;
-    v_current_scope_id uuid;
+    v_user_attributes jsonb;
+    v_policy_type text;
+    v_policy_attribute text;
+    v_policy_value jsonb;
+    v_user_attribute_value jsonb;
 BEGIN
-    -- Get the current user context
+    -- Get user attributes
     SELECT
-        user_id,
-        scope_id INTO v_current_user_id,
-        v_current_scope_id
+        attributes INTO v_user_attributes
     FROM
-        keyhippo.current_user_context ();
-    -- Check if the current user has 'manage_policies' permission in any group
-    IF NOT EXISTS (
-        SELECT
-            1
-        FROM
-            keyhippo_rbac.user_group_roles ugr
-            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-        WHERE
-            ugr.user_id = v_current_user_id
-            AND p.name = 'manage_policies') THEN
-    RAISE EXCEPTION 'Unauthorized to create policies';
-END IF;
-INSERT INTO keyhippo_abac.policies (name, description, POLICY)
-        VALUES (p_name, p_description, p_policy)
-    ON CONFLICT (name)
-        DO UPDATE SET
-            description = EXCLUDED.description, POLICY = EXCLUDED.policy;
+        keyhippo_abac.user_attributes
+    WHERE
+        user_id = p_user_id;
+    -- Extract policy details
+    v_policy_type := p_policy ->> 'type';
+    v_policy_attribute := p_policy ->> 'attribute';
+    v_policy_value := p_policy -> 'value';
+    -- Get the user's attribute value
+    v_user_attribute_value := v_user_attributes -> v_policy_attribute;
+    -- Check policy
+    IF v_policy_type = 'attribute_equals' THEN
+        RETURN v_user_attribute_value = v_policy_value;
+    ELSE
+        RAISE EXCEPTION 'Unsupported policy type: %', v_policy_type;
+    END IF;
 END;
 $$;
 
@@ -874,6 +846,35 @@ BEGIN
 END;
 $$;
 
+-- Function: add_policy
+CREATE OR REPLACE FUNCTION keyhippo_abac.add_policy (p_name text, p_description text, p_policy jsonb)
+    RETURNS uuid
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_temp
+    AS $$
+DECLARE
+    v_current_user_id uuid;
+    v_policy_id uuid;
+BEGIN
+    -- Get the current user context
+    SELECT
+        user_id INTO v_current_user_id
+    FROM
+        keyhippo.current_user_context ();
+    -- Check if the current user has 'manage_policies' permission
+    IF NOT keyhippo_rbac.user_has_permission ('manage_policies') THEN
+        RAISE EXCEPTION 'Unauthorized to create policies';
+    END IF;
+    -- Insert the new policy
+    INSERT INTO keyhippo_abac.policies (name, description, POLICY)
+            VALUES (p_name, p_description, p_policy)
+        RETURNING
+            id INTO v_policy_id;
+    RETURN v_policy_id;
+END;
+$$;
+
 -- -------------------------------
 -- RLS Policies
 -- -------------------------------
@@ -895,79 +896,52 @@ ALTER TABLE keyhippo_abac.user_attributes ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE keyhippo_abac.policies ENABLE ROW LEVEL SECURITY;
 
--- RBAC: User-Group-Roles Access Policy
-CREATE POLICY "rbac_user_group_roles_access" ON keyhippo_rbac.user_group_roles
-    FOR ALL
-        USING ((
-            SELECT
-                user_id
-            FROM
-                keyhippo.current_user_context ()) = user_id
-                OR EXISTS (
-                    SELECT
-                        1
-                    FROM
-                        keyhippo_rbac.user_group_roles ugr
-                        JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-                        JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-                    WHERE
-                        ugr.user_id = (
-                            SELECT
-                                user_id
-                            FROM
-                                keyhippo.current_user_context ()) AND ugr.group_id = keyhippo_rbac.user_group_roles.group_id AND p.name = 'manage_roles')
-                                OR CURRENT_ROLE = 'service_role') WITH CHECK (CURRENT_ROLE = 'service_role');
+-- TODO replace user_has_permission with scope_has_permission in most places
+--
+-- RBAC: RLS Policy
+CREATE POLICY groups_access_policy ON keyhippo_rbac.groups
+    FOR ALL TO authenticated
+        USING (TRUE)
+        WITH CHECK (keyhippo_rbac.user_has_permission ('manage_groups'));
 
--- RBAC: Claims Cache Access Policy
-CREATE POLICY "rbac_claims_cache_access" ON keyhippo_rbac.claims_cache
-    FOR SELECT
+CREATE POLICY permissions_access_policy ON keyhippo_rbac.permissions
+    FOR ALL TO authenticated
+        USING (TRUE)
+        WITH CHECK (keyhippo_rbac.user_has_permission ('manage_permissions'));
+
+CREATE POLICY roles_access_policy ON keyhippo_rbac.roles
+    FOR ALL TO authenticated
+        USING (TRUE)
+        WITH CHECK (keyhippo_rbac.user_has_permission ('manage_roles'));
+
+CREATE POLICY role_permissions_access_policy ON keyhippo_rbac.role_permissions
+    FOR ALL TO authenticated
+        USING (TRUE)
+        WITH CHECK (keyhippo_rbac.user_has_permission ('manage_roles'));
+
+CREATE POLICY user_group_roles_access_policy ON keyhippo_rbac.user_group_roles
+    FOR ALL TO authenticated
+        USING (TRUE)
+        WITH CHECK (keyhippo_rbac.user_has_permission ('manage_roles'));
+
+CREATE POLICY claims_cache_access_policy ON keyhippo_rbac.claims_cache
+    FOR SELECT TO authenticated
         USING ((
             SELECT
                 user_id
             FROM
-                keyhippo.current_user_context ()) = user_id
-                OR CURRENT_ROLE = 'service_role');
+                keyhippo.current_user_context ()) = keyhippo_rbac.claims_cache.user_id);
 
 -- ABAC: User Attributes Access Policy
-CREATE POLICY "abac_user_attributes_access" ON keyhippo_abac.user_attributes
-    FOR ALL
-        USING ((
-            SELECT
-                user_id
-            FROM
-                keyhippo.current_user_context ()) = user_id
-                OR EXISTS (
-                    SELECT
-                        1
-                    FROM
-                        keyhippo_rbac.user_group_roles ugr
-                        JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-                        JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-                    WHERE
-                        ugr.user_id = (
-                            SELECT
-                                user_id
-                            FROM
-                                keyhippo.current_user_context ()) AND p.name = 'manage_user_attributes')
-                                OR CURRENT_ROLE = 'service_role') WITH CHECK (CURRENT_ROLE = 'service_role');
+CREATE POLICY user_attributes_access_policy ON keyhippo_abac.user_attributes
+    FOR ALL TO authenticated
+        USING (TRUE)
+        WITH CHECK (keyhippo_rbac.user_has_permission ('manage_user_attributes'));
 
--- ABAC: Policies Access Policy
-CREATE POLICY "abac_policies_access" ON keyhippo_abac.policies
-    FOR ALL
-        USING (EXISTS (
-            SELECT
-                1
-            FROM
-                keyhippo_rbac.user_group_roles ugr
-                JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-                JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-            WHERE
-                ugr.user_id = (
-                    SELECT
-                        user_id
-                    FROM
-                        keyhippo.current_user_context ()) AND p.name = 'manage_policies')
-                        OR CURRENT_ROLE = 'service_role') WITH CHECK (CURRENT_ROLE = 'service_role');
+CREATE POLICY policies_access_policy ON keyhippo_abac.policies
+    FOR ALL TO authenticated
+        USING (TRUE)
+        WITH CHECK (keyhippo_rbac.user_has_permission ('manage_policies'));
 
 -- -------------------------------
 -- Permissions and Grants
@@ -977,30 +951,43 @@ GRANT USAGE ON SCHEMA keyhippo_rbac TO authenticated, service_role;
 
 GRANT USAGE ON SCHEMA keyhippo_abac TO authenticated, service_role;
 
--- Grant SELECT on RBAC, ABAC tables
-GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo_rbac TO authenticated;
-
-GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo_abac TO authenticated;
-
 -- Grant EXECUTE on RBAC functions
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_role_to_user (uuid, uuid, text) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.update_user_claims_cache (uuid) TO authenticated;
 
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.user_has_permission (text) TO authenticated;
+
 -- Grant EXECUTE on ABAC functions
 GRANT EXECUTE ON FUNCTION keyhippo_abac.set_user_attribute (uuid, text, jsonb) TO authenticated;
-
-GRANT EXECUTE ON FUNCTION keyhippo_abac.create_policy (text, text, jsonb) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo_abac.check_abac_policy (uuid, jsonb) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo_abac.evaluate_policies (uuid) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo_abac.add_policy (text, text, jsonb) TO authenticated;
 
 -- Grant SELECT, INSERT, UPDATE, DELETE on all RBAC tables to service_role
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo_rbac TO service_role;
 
 -- Grant SELECT, INSERT, UPDATE, DELETE on all ABAC tables to service_role
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo_abac TO service_role;
+
+-- Grant SELECT, INSERT, UPDATE, DELETE on RBAC tables to authenticated
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.groups TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.roles TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.permissions TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.role_permissions TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON keyhippo_rbac.user_group_roles TO authenticated;
+
+GRANT SELECT ON keyhippo_rbac.claims_cache TO authenticated;
+
+-- Grant SELECT, INSERT, UPDATE, DELETE on ABAC tables to authenticated
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo_abac TO authenticated;
 
 -- -------------------------------
 -- Triggers
