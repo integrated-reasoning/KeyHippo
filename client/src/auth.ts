@@ -45,66 +45,31 @@ const createAuthenticatedSupabaseClient = (
 };
 
 /**
- * Retrieves the user ID associated with the provided API key.
- * @param authenticatedSupabase - The authenticated Supabase client.
- * @param apiKey - The API key.
- * @returns The user ID.
- * @throws ApplicationError if the API key is invalid or does not correspond to any user.
+ * Retrieves the current user context from the Supabase backend.
+ * @param supabase - The Supabase client to use for the RPC call.
+ * @returns A Promise resolving to the user context (AuthResult["auth"]).
+ * @throws {ApplicationError} If the user context cannot be retrieved or the user is not authenticated.
  */
-const getUserIdForApiKey = async (
-  authenticatedSupabase: SupabaseClient,
-  apiKey: ApiKeyText,
-): Promise<UserId> => {
-  const { data: userId, error: apiKeyError } = await authenticatedSupabase
-    .schema("keyhippo")
-    .rpc("verify_api_key", { api_key: apiKey });
-
-  if (apiKeyError) {
-    throw {
-      type: "UnauthorizedError",
-      message: "Invalid API key.",
-    } as ApplicationError;
-  }
-
-  if (!userId) {
-    throw {
-      type: "UnauthorizedError",
-      message: "API key does not correspond to any user.",
-    } as ApplicationError;
-  }
-
-  return userId;
-};
-
-/**
- * Retrieves the authenticated user's ID using the Supabase client.
- * @param supabase - The Supabase client.
- * @returns The authenticated user's ID.
- * @throws ApplicationError if retrieving the user fails or the user is not authenticated.
- */
-const getAuthenticatedUserId = async (
+const getCurrentUserContext = async (
   supabase: SupabaseClient,
-): Promise<UserId> => {
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
+): Promise<AuthResult["auth"]> => {
+  const { data, error } = await supabase
+    .schema("keyhippo")
+    .rpc("current_user_context")
+    .single();
   if (error) {
     throw {
       type: "AuthenticationError",
-      message: "Failed to retrieve authenticated user.",
+      message: "Failed to retrieve user context.",
     } as ApplicationError;
   }
-
-  if (!user) {
+  if (!data) {
     throw {
       type: "UnauthorizedError",
       message: "User not authenticated.",
     } as ApplicationError;
   }
-
-  return user.id;
+  return data as AuthResult["auth"];
 };
 
 /**
@@ -152,7 +117,7 @@ const handleAuthenticationError = (error: unknown, logger: Logger): never => {
  * @param headers - The request headers.
  * @param supabase - The Supabase client.
  * @param logger - The logger instance.
- * @returns An AuthResult containing the user ID and authenticated Supabase client.
+ * @returns An AuthResult containing the auth context and authenticated Supabase client.
  * @throws ApplicationError if authentication fails.
  */
 export const authenticate = async (
@@ -167,13 +132,13 @@ export const authenticate = async (
         supabase,
         apiKey,
       );
-      const userId = await getUserIdForApiKey(authenticatedSupabase, apiKey);
-      logAuthentication(logger, userId);
-      return { userId, supabase: authenticatedSupabase };
+      const authResult = await getCurrentUserContext(authenticatedSupabase);
+      logAuthentication(logger, authResult.user_id);
+      return { auth: authResult, supabase: authenticatedSupabase };
     } else {
-      const userId = await getAuthenticatedUserId(supabase);
-      logAuthentication(logger, userId);
-      return { userId, supabase };
+      const authResult = await getCurrentUserContext(supabase);
+      logAuthentication(logger, authResult.user_id);
+      return { auth: authResult, supabase };
     }
   } catch (error) {
     return handleAuthenticationError(error, logger);

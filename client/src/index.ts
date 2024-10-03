@@ -23,7 +23,7 @@ import {
   UserId,
   ApiKeyId,
   Description,
-  RotateApiKeyResult
+  RotateApiKeyResult,
 } from "./types";
 
 /**
@@ -100,15 +100,9 @@ export class KeyHippo {
    * Note: The generated API key is returned only once and cannot be retrieved
    * later. Ensure it's securely transmitted to the user.
    */
-  async createApiKey(
-    keyDescription: Description,
-  ): Promise<ApiKeyEntity> {
+  async createApiKey(keyDescription: Description): Promise<ApiKeyEntity> {
     try {
-      return await createApiKey(
-        this.supabase,
-        keyDescription,
-        this.logger,
-      );
+      return await createApiKey(this.supabase, keyDescription, this.logger);
     } catch (error) {
       this.logger.error(
         `Error creating API key: ${error instanceof Error ? error.message : String(error)}`,
@@ -285,23 +279,23 @@ export class KeyHippo {
     }
   }
 
-
   /**
    * Authenticates a user based on the provided request headers.
    *
    * @param headers - The HTTP headers from the incoming request, typically
    *                  containing the KeyHippo API key or session credentials.
-   * @returns A Promise resolving to an AuthResult object containing the authenticated user ID
+   * @returns A Promise resolving to an AuthResult object containing the authenticated user context
    *          and an authenticated Supabase client.
    *
    * Authentication process:
-   * 1. Extracts the x-api-key header from the provided request headers.
-   * 2. If the x-api-key header contains a KeyHippo API key:
-   *    a. Calls the 'verify_api_key' function to validate the API key and retrieve the associated user ID.
-   *    b. If valid, returns the user ID and the authenticated Supabase client.
-   * 3. If no KeyHippo API key is provided, it attempts session-based authentication:
-   *    a. Calls Supabase's `auth.getUser()` to retrieve the session user.
-   *    b. If the user is authenticated, returns the user ID and the Supabase client.
+   * 1. Extracts the API key from the Authorization header (Bearer token).
+   * 2. If an API key is present:
+   *    a. Creates an authenticated Supabase client with the API key.
+   *    b. Calls the 'current_user_context' RPC function to validate the API key and retrieve the associated user context.
+   *    c. If valid, returns the user context and the authenticated Supabase client.
+   * 3. If no API key is provided, it attempts session-based authentication:
+   *    a. Uses the existing Supabase client to call the 'current_user_context' RPC function.
+   *    b. If the user is authenticated, returns the user context and the existing Supabase client.
    * 4. If neither API key nor session authentication succeeds, throws an error.
    *
    * Security considerations:
@@ -312,11 +306,12 @@ export class KeyHippo {
    * Usage example:
    * ```typescript
    * const headers = new Headers({
-   *   'x-api-key': 'keyhippo_a4f1e0a5d...'
+   *   'Authorization': 'Bearer LntFjMwR8s0jjjVzampW6zXA...'
    * });
    * try {
-   *   const { userId, supabase } = await keyHippo.authenticate(headers);
-   *   console.log(`Authenticated user: ${userId}`);
+   *   const { auth, supabase } = await keyHippo.authenticate(headers);
+   *   console.log(`Authenticated user: ${auth.user_id}`);
+   *   console.log(`User permissions: ${auth.permissions}`);
    *   // Use the authenticated Supabase client for further operations
    * } catch (error) {
    *   console.error('Authentication failed:', error.message);
@@ -326,9 +321,10 @@ export class KeyHippo {
    * Error handling:
    * - Throws an error if authentication fails due to an invalid KeyHippo API key,
    *   missing session, or other issues.
+   * - All authentication errors are logged before being re-thrown.
    *
    * Note: This method supports both API key-based authentication and
-   * session-based authentication.
+   * session-based authentication, providing a unified interface for both methods.
    */
   async authenticate(headers: Headers): Promise<AuthResult> {
     try {

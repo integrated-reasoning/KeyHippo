@@ -22,6 +22,11 @@ export type ApiKeyId = string;
 export type UserId = string;
 
 /**
+ * The unique identifier of a scope.
+ */
+export type ScopeId = string;
+
+/**
  * A description text.
  */
 export type Description = string;
@@ -120,10 +125,10 @@ export type ApiKeyMetadata = ApiKeyBase & ApiKeyMetadataFields & Timestamped;
 export interface ApiKeyEntity extends ApiKeySummary {
   user_id: UserId;
   created_at: Timestamp;
-  last_used_at: Timestamp | null;
+  last_used_at: Optional<Timestamp>;
   expires_at: Timestamp;
   is_revoked: boolean;
-  apiKey: ApiKeyText | null;
+  apiKey: Optional<ApiKeyText>;
 }
 
 // Operation result types
@@ -182,16 +187,27 @@ export type AuthenticationResult = {
 // Authorization types
 export type AuthResult = {
   /**
-   * The unique identifier of the authenticated user.
+   * An array containing the authentication result.
    */
-  userId: UserId;
-
+  auth: {
+    /**
+     * The unique identifier of the authenticated user.
+     */
+    user_id: UserId;
+    /**
+     * The permissions associated with the authenticated user.
+     */
+    permissions: Array<Permission>;
+    /**
+     * The scope identifier, if any.
+     */
+    scope_id: Optional<ScopeId>;
+  };
   /**
    * The authenticated Supabase client instance.
    */
   supabase: SupabaseClient;
 };
-
 
 // Logger interface
 /**

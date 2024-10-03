@@ -55,17 +55,16 @@ describe("KeyHippo Client Tests", () => {
     const mockHeaders = new Headers({
       Authorization: `Bearer ${createdKey}`,
     });
-    const { userId, supabase } =
-      await testSetup.keyHippo.authenticate(mockHeaders);
+    const result = await testSetup.keyHippo.authenticate(mockHeaders);
 
-    expect(userId).toBe(testSetup.userId);
-    expect(supabase).toBeDefined();
+    expect(result.auth.user_id).toBe(testSetup.userId);
+    expect(result.supabase).toBeDefined();
 
-    const { data: obtainedUserId, error: _ } = await supabase
+    const { data: obtainedUserId, error } = await result.supabase
       .schema("keyhippo")
       .rpc("verify_api_key", { api_key: createdKey });
 
-    expect(obtainedUserId).toBe(userId);
+    expect(obtainedUserId[0].user_id).toBe(testSetup.userId);
   });
 
   it("should revoke an API key", async () => {
@@ -111,11 +110,10 @@ describe("KeyHippo Client Tests", () => {
     const mockHeaders = new Headers({
       Authorization: `Bearer ${rotatedKeyInfo.apiKey}`,
     });
-    const { userId, supabase } =
-      await testSetup.keyHippo.authenticate(mockHeaders);
+    const result = await testSetup.keyHippo.authenticate(mockHeaders);
 
-    expect(userId).toBe(testSetup.userId);
-    expect(supabase).toBeDefined();
+    expect(result.auth.user_id).toBe(testSetup.userId);
+    expect(result.supabase).toBeDefined();
   });
 
   it("should handle errors when rotating a non-existent API key", async () => {
@@ -166,12 +164,6 @@ describe("KeyHippo Client Tests", () => {
     );
     console.log("Rotated Key Info:", rotatedKeyInfo);
 
-    if ("status" in rotatedKeyInfo && rotatedKeyInfo.status === "failed") {
-      expect.fail(
-        `API key rotation failed: ${(rotatedKeyInfo as any).message}`,
-      );
-    }
-
     expect(rotatedKeyInfo.id).toBeDefined();
     expect(rotatedKeyInfo.apiKey).toBeDefined();
 
@@ -221,7 +213,7 @@ describe("KeyHippo Client Tests", () => {
       Authorization: `Bearer ${keyInfo.apiKey}`,
     });
     await expect(testSetup.keyHippo.authenticate(mockHeaders)).rejects.toThrow(
-      "API key does not correspond to any user.",
+      "Failed to retrieve user context.",
     );
   });
 
@@ -283,19 +275,18 @@ describe("KeyHippo Client Tests", () => {
 
     // Attempt to create an oversized API key
     await expect(
-      testSetup.keyHippo.createApiKey(
-        oversizedKeyDescription,
-      ),
-    ).rejects.toThrow("Failed to create API key: Error: Create API key RPC failed: [KeyHippo] Invalid key description");
+      testSetup.keyHippo.createApiKey(oversizedKeyDescription),
+    ).rejects.toThrow(
+      "Failed to create API key: Error: Create API key RPC failed: [KeyHippo] Invalid key description",
+    );
   });
 
   it("should reject tampered API keys", async () => {
     const keyDescription = "Tampered Key";
 
     // Create an API key
-    const createdKeyInfo = await testSetup.keyHippo.createApiKey(
-      keyDescription,
-    );
+    const createdKeyInfo =
+      await testSetup.keyHippo.createApiKey(keyDescription);
 
     // Tamper with the key
     const tamperedKey = createdKeyInfo.apiKey!.slice(0, -1) + "X"; // Modify the last character
@@ -303,7 +294,7 @@ describe("KeyHippo Client Tests", () => {
     // Attempt to authenticate using the tampered key
     const mockHeaders = new Headers({ Authorization: `Bearer ${tamperedKey}` });
     await expect(testSetup.keyHippo.authenticate(mockHeaders)).rejects.toThrow(
-      "API key does not correspond to any user.",
+      "Failed to retrieve user context.",
     );
   });
 
