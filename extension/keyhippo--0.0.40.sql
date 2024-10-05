@@ -89,6 +89,11 @@ CREATE TABLE IF NOT EXISTS keyhippo_abac.policies (
     policy jsonb NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS keyhippo_abac.group_attributes (
+    group_id uuid PRIMARY KEY REFERENCES keyhippo_rbac.groups (id) ON DELETE CASCADE,
+    attributes jsonb DEFAULT '{}' ::jsonb
+);
+
 -- Create KeyHippo tables
 CREATE TABLE keyhippo.scopes (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
@@ -644,6 +649,22 @@ BEGIN
     ON CONFLICT (user_id)
         DO UPDATE SET
             attributes = keyhippo_abac.user_attributes.attributes || jsonb_build_object(p_attribute, p_value);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION keyhippo_abac.get_group_attribute (p_group_id uuid, p_attribute text)
+    RETURNS TABLE (
+        value jsonb)
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        attributes -> p_attribute
+    FROM
+        keyhippo_abac.group_attributes
+    WHERE
+        group_id = p_group_id;
 END;
 $$;
 
