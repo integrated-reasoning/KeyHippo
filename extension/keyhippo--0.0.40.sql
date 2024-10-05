@@ -570,6 +570,23 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION keyhippo_rbac.get_role_permissions (p_role_id uuid)
+    RETURNS TABLE (
+        permissions text[])
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        ARRAY_AGG(p.name)
+    FROM
+        keyhippo_rbac.role_permissions rp
+        JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+    WHERE
+        rp.role_id = p_role_id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION keyhippo_rbac.update_user_claims_cache (p_user_id uuid)
     RETURNS void
     LANGUAGE plpgsql
