@@ -557,6 +557,19 @@ END IF;
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION keyhippo_rbac.create_role (p_role_name text, p_group_id uuid, p_description text)
+    RETURNS TABLE (
+        role_id uuid)
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    INSERT INTO keyhippo_rbac.roles (name, group_id, description)
+        VALUES (p_role_name, p_group_id, p_description)
+    RETURNING
+        id INTO role_id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION keyhippo_rbac.update_user_claims_cache (p_user_id uuid)
     RETURNS void
     LANGUAGE plpgsql
