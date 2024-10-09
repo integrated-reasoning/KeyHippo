@@ -865,7 +865,20 @@ CREATE OR REPLACE FUNCTION keyhippo_abac.evaluate_policies (p_user_id uuid)
     AS $$
 DECLARE
     policy_record RECORD;
+    v_user_attributes jsonb;
 BEGIN
+    -- Get user attributes
+    SELECT
+        attributes INTO v_user_attributes
+    FROM
+        keyhippo_abac.user_attributes
+    WHERE
+        user_id = p_user_id;
+    -- If user attributes are not found, return FALSE immediately
+    IF v_user_attributes IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    -- Loop through all policies and evaluate them
     FOR policy_record IN
     SELECT
         *
