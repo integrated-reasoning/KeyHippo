@@ -1,34 +1,38 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger } from "../types";
-import { logDebug, logInfo } from "../utils/logging";
-import { handleError } from "../utils";
+import { Logger, UserId } from "../types";
+import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
 
 /**
- * Logs an attempt to set a specific user attribute.
+ * Logs the attempt to set a user attribute.
  * @param logger - The logger instance used for logging.
- * @param userId - The ID of the user whose attribute is being set.
+ * @param userId - The ID of the user.
  * @param attribute - The name of the attribute being set.
+ * @param value - The value of the attribute.
  */
 const logSetUserAttributeAttempt = (
   logger: Logger,
-  userId: string,
+  userId: UserId,
   attribute: string,
+  value: any,
 ): void => {
-  logDebug(logger, `Setting attribute ${attribute} for user ${userId}`);
+  logDebug(
+    logger,
+    `Attempting to set attribute '${attribute}' for User ID: ${userId} with value: ${value}`,
+  );
 };
 
 /**
- * Executes the RPC call to set a user attribute in the database.
+ * Executes the RPC call to set the user attribute in the database.
  * @param supabase - The Supabase client instance.
- * @param userId - The ID of the user whose attribute is being set.
- * @param attribute - The name of the attribute to set.
- * @param value - The value to assign to the attribute.
- * @returns A promise that resolves when the operation is complete.
- * @throws Error if the RPC call fails to set the user attribute.
+ * @param userId - The ID of the user.
+ * @param attribute - The name of the attribute being set.
+ * @param value - The value of the attribute.
+ * @returns A promise that resolves when the attribute is set successfully.
+ * @throws Error if the RPC call fails to set the attribute.
  */
 const executeSetUserAttributeRpc = async (
   supabase: SupabaseClient<any, "public", any>,
-  userId: string,
+  userId: UserId,
   attribute: string,
   value: any,
 ): Promise<void> => {
@@ -41,46 +45,68 @@ const executeSetUserAttributeRpc = async (
     });
 
   if (error) {
-    throw new Error(`Failed to set user attribute: ${error.message}`);
+    throw new Error(`Set User Attribute RPC failed: ${error.message}`);
   }
 };
 
 /**
  * Logs the successful setting of a user attribute.
  * @param logger - The logger instance used for logging.
- * @param userId - The ID of the user whose attribute was set.
- * @param attribute - The name of the attribute that was set.
+ * @param userId - The ID of the user.
+ * @param attribute - The name of the attribute set.
  */
 const logSetUserAttributeSuccess = (
   logger: Logger,
-  userId: string,
+  userId: UserId,
   attribute: string,
 ): void => {
-  logInfo(logger, `Successfully set attribute ${attribute} for user ${userId}`);
+  logInfo(
+    logger,
+    `Successfully set attribute '${attribute}' for User ID: ${userId}`,
+  );
 };
 
 /**
- * Sets a specific attribute for a user in the database.
- * @param supabase - The Supabase client instance used to interact with the database.
- * @param userId - The ID of the user whose attribute is to be set.
- * @param attribute - The name of the attribute to set.
- * @param value - The value to assign to the attribute.
- * @param logger - The logger instance used for logging events and errors.
- * @returns A promise that resolves when the attribute has been set successfully.
- * @throws AppError if the setting process fails.
+ * Handles errors that occur during the set user attribute process.
+ * @param error - The error encountered during the process.
+ * @param logger - The logger instance used for logging errors.
+ * @throws ApplicationError encapsulating the original error with a descriptive message.
+ */
+const handleSetUserAttributeError = (
+  error: unknown,
+  logger: Logger,
+  userId: UserId,
+  attribute: string,
+): never => {
+  logError(
+    logger,
+    `Failed to set attribute '${attribute}' for User ID: ${userId}. Error: ${error}`,
+  );
+  throw createDatabaseError(`Failed to set user attribute: ${error}`);
+};
+
+/**
+ * Sets an attribute for a specified user in the ABAC system.
+ * @param supabase - The Supabase client.
+ * @param userId - The ID of the user.
+ * @param attribute - The name of the attribute being set.
+ * @param value - The value of the attribute.
+ * @param logger - The logger instance.
+ * @returns A promise that resolves when the attribute is set successfully.
+ * @throws ApplicationError if the process fails.
  */
 export const setUserAttribute = async (
   supabase: SupabaseClient<any, "public", any>,
-  userId: string,
+  userId: UserId,
   attribute: string,
   value: any,
   logger: Logger,
 ): Promise<void> => {
   try {
-    logSetUserAttributeAttempt(logger, userId, attribute);
+    logSetUserAttributeAttempt(logger, userId, attribute, value);
     await executeSetUserAttributeRpc(supabase, userId, attribute, value);
     logSetUserAttributeSuccess(logger, userId, attribute);
   } catch (error) {
-    return handleError(error, logger, "Failed to set user attribute");
+    return handleSetUserAttributeError(error, logger, userId, attribute);
   }
 };
