@@ -23,6 +23,7 @@ const executeGetRolePermissionsRpc = async (
   roleId: RoleId,
 ): Promise<{ permissions: string[] }> => {
   const { data, error } = await supabase
+    .schema("keyhippo_rbac")
     .rpc("get_role_permissions", {
       p_role_id: roleId,
     })
