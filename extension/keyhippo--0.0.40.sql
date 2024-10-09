@@ -1135,3 +1135,128 @@ CREATE TRIGGER after_user_group_roles_change
 -- Notify PostgREST to reload configuration
 NOTIFY pgrst,
 'reload config';
+
+-- TODO: Break this out:
+DO $$
+BEGIN
+    -- Insert Admin Group if not already present
+    IF NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.groups
+        WHERE
+            name = 'Admin Group') THEN
+    INSERT INTO keyhippo_rbac.groups (name, description)
+        VALUES ('Admin Group', 'Group for administrators');
+END IF;
+END
+$$;
+
+DO $$
+DECLARE
+    admin_group_id uuid;
+BEGIN
+    -- Fetch Admin Group ID
+    SELECT
+        id INTO admin_group_id
+    FROM
+        keyhippo_rbac.groups
+    WHERE
+        name = 'Admin Group';
+    -- Insert Admin Role if it doesn't exist
+    IF NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.roles
+        WHERE
+            name = 'Admin'
+            AND group_id = admin_group_id) THEN
+    INSERT INTO keyhippo_rbac.roles (name, description, group_id)
+        VALUES ('Admin', 'Admin role', admin_group_id);
+END IF;
+END
+$$;
+
+DO $$
+BEGIN
+    -- Insert User Group if not already present
+    IF NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.groups
+        WHERE
+            name = 'User Group') THEN
+    INSERT INTO keyhippo_rbac.groups (name, description)
+        VALUES ('User Group', 'Group for regular users');
+END IF;
+END
+$$;
+
+DO $$
+DECLARE
+    user_group_id uuid;
+BEGIN
+    -- Fetch User Group ID
+    SELECT
+        id INTO user_group_id
+    FROM
+        keyhippo_rbac.groups
+    WHERE
+        name = 'User Group';
+    -- Insert User Role if it doesn't exist
+    IF NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.roles
+        WHERE
+            name = 'User'
+            AND group_id = user_group_id) THEN
+    INSERT INTO keyhippo_rbac.roles (name, description, group_id)
+        VALUES ('User', 'User role', user_group_id);
+END IF;
+END
+$$;
+
+INSERT INTO keyhippo_rbac.roles (name, description, group_id)
+    VALUES ('supabase_auth_admin', 'Role for Supabase Admins', (
+            SELECT
+                id
+            FROM
+                keyhippo_rbac.groups
+            WHERE
+                name = 'Admin Group'));
+
+INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
+SELECT
+    r.id,
+    p.id
+FROM
+    keyhippo_rbac.roles r,
+    keyhippo_rbac.permissions p
+WHERE
+    r.name = 'supabase_auth_admin'
+    AND p.name = 'manage_policies';
+
+INSERT INTO keyhippo_rbac.permissions (name, description)
+    VALUES ('manage_user_attributes', 'Permission to manage user attributes')
+ON CONFLICT (name)
+    DO NOTHING;
+
+-- Assign manage_user_attributes permission to supabase_auth_admin role
+INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
+SELECT
+    r.id,
+    p.id
+FROM
+    keyhippo_rbac.roles r,
+    keyhippo_rbac.permissions p
+WHERE
+    r.name = 'supabase_auth_admin'
+    AND p.name = 'manage_user_attributes'
+ON CONFLICT (role_id,
+    permission_id)
+    DO NOTHING;
