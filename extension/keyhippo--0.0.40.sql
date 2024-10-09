@@ -1085,6 +1085,8 @@ GRANT EXECUTE ON FUNCTION keyhippo.current_user_context () TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_role_to_user (uuid, uuid, text) TO authenticated;
 
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.set_parent_role (uuid, uuid) TO authenticated;
+
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.update_user_claims_cache (uuid) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.user_has_permission (text) TO authenticated;
