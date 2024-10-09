@@ -986,6 +986,11 @@ CREATE POLICY groups_access_policy ON keyhippo_rbac.groups
         USING (TRUE)
         WITH CHECK (keyhippo_rbac.user_has_permission ('manage_groups'));
 
+CREATE POLICY groups_auth_admin_policy ON keyhippo_rbac.groups
+    FOR ALL TO supabase_auth_admin
+        USING (TRUE)
+        WITH CHECK (TRUE);
+
 CREATE POLICY permissions_access_policy ON keyhippo_rbac.permissions
     FOR ALL TO authenticated
         USING (TRUE)
@@ -995,6 +1000,11 @@ CREATE POLICY roles_access_policy ON keyhippo_rbac.roles
     FOR ALL TO authenticated
         USING (TRUE)
         WITH CHECK (keyhippo_rbac.user_has_permission ('manage_roles'));
+
+CREATE POLICY roles_auth_admin_policy ON keyhippo_rbac.roles
+    FOR ALL TO supabase_auth_admin
+        USING (TRUE)
+        WITH CHECK (TRUE);
 
 CREATE POLICY role_permissions_access_policy ON keyhippo_rbac.role_permissions
     FOR ALL TO authenticated
@@ -1014,6 +1024,10 @@ CREATE POLICY claims_cache_access_policy ON keyhippo_rbac.claims_cache
             FROM
                 keyhippo.current_user_context ()) = keyhippo_rbac.claims_cache.user_id);
 
+CREATE POLICY claims_cache_auth_admin_policy ON keyhippo_rbac.claims_cache
+    FOR SELECT TO supabase_auth_admin
+        USING (keyhippo_rbac.claims_cache.user_id = current_setting('request.jwt.claim.sub', TRUE)::uuid);
+
 CREATE POLICY user_attributes_access_policy ON keyhippo_abac.user_attributes
     FOR ALL TO authenticated
         USING (TRUE)
@@ -1023,6 +1037,11 @@ CREATE POLICY policies_access_policy ON keyhippo_abac.policies
     FOR ALL TO authenticated
         USING (TRUE)
         WITH CHECK (keyhippo_rbac.user_has_permission ('manage_policies'));
+
+CREATE POLICY policies_auth_admin_policy ON keyhippo_abac.policies
+    FOR ALL TO supabase_auth_admin
+        USING (TRUE)
+        WITH CHECK (TRUE);
 
 CREATE POLICY scopes_access_policy ON keyhippo.scopes
     FOR ALL TO authenticated
@@ -1041,6 +1060,10 @@ CREATE POLICY api_key_metadata_access_policy ON keyhippo.api_key_metadata
                 user_id
             FROM
                 keyhippo.current_user_context ()));
+
+CREATE POLICY api_key_metadata_auth_admin_policy ON keyhippo.api_key_metadata
+    FOR ALL TO supabase_auth_admin
+        USING (TRUE);
 
 CREATE POLICY api_key_secrets_no_access_policy ON keyhippo.api_key_secrets
     FOR ALL TO authenticated
