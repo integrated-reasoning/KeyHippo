@@ -6,12 +6,21 @@ import {
   revokeApiKey,
   rotateApiKey,
 } from "./api-keys";
-import { addUserToGroup, setParentRole, updateUserClaimsCache } from "./rbac";
+import {
+  addUserToGroup,
+  createRole,
+  getParentRole,
+  setParentRole,
+  getRolePermissions,
+  updateUserClaimsCache,
+} from "./rbac";
 import {
   createPolicy,
   evaluatePolicies,
   getUserAttribute,
   setUserAttribute,
+  getGroupAttribute,
+  setGroupAttribute,
 } from "./abac";
 import { authenticate } from "./auth";
 import {
@@ -694,6 +703,7 @@ export class KeyHippo {
    * Note: This method sets a single attribute. For setting multiple attributes at once,
    * consider implementing a batch update method.
    */
+
   async setUserAttribute(
     userId: UserId,
     attribute: string,
@@ -710,6 +720,59 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error setting user attribute: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  async createRole(
+    roleName: string,
+    groupId: GroupId,
+    description: string = "",
+  ): Promise<RoleId> {
+    try {
+      return await createRole(
+        this.supabase,
+        roleName,
+        groupId,
+        description,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error creating role: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  async getRolePermissions(roleId: RoleId): Promise<string[]> {
+    try {
+      return await getRolePermissions(this.supabase, roleId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error getting role permissions: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  async setGroupAttribute(
+    groupId: GroupId,
+    attribute: string,
+    value: any,
+  ): Promise<void> {
+    try {
+      await setGroupAttribute(
+        this.supabase,
+        groupId,
+        attribute,
+        value,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error setting group attribute: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
