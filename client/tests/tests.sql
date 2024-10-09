@@ -344,7 +344,7 @@ DECLARE
 BEGIN
     -- Add user to group with role
     PERFORM
-        keyhippo.add_user_to_group (current_setting('test.user1_id')::uuid, group_id, role_name);
+        keyhippo_rbac.add_user_to_group (current_setting('test.user1_id')::uuid, group_id, role_name);
     -- Query claims cache directly to verify
     SELECT
         rbac_claims INTO claims_cache_result
@@ -416,10 +416,10 @@ DECLARE
 BEGIN
     -- Assign Admin role
     PERFORM
-        keyhippo.add_user_to_group (current_setting('test.user1_id')::uuid, admin_group_id, admin_role_name);
+        keyhippo_rbac.add_user_to_group (current_setting('test.user1_id')::uuid, admin_group_id, admin_role_name);
     -- Assign User role
     PERFORM
-        keyhippo.add_user_to_group (current_setting('test.user1_id')::uuid, user_group_id, user_role_name);
+        keyhippo_rbac.add_user_to_group (current_setting('test.user1_id')::uuid, user_group_id, user_role_name);
     -- Query claims cache directly to verify
     SELECT
         rbac_claims INTO claims_cache_result
