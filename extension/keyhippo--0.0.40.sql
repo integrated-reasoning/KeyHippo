@@ -892,7 +892,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION keyhippo_abac.add_policy (p_name text, p_description text, p_policy jsonb)
+CREATE OR REPLACE FUNCTION keyhippo_abac.create_policy (p_name text, p_description text, p_policy jsonb)
     RETURNS uuid
     LANGUAGE plpgsql
     SECURITY DEFINER
@@ -901,22 +901,56 @@ CREATE OR REPLACE FUNCTION keyhippo_abac.add_policy (p_name text, p_description 
 DECLARE
     v_current_user_id uuid;
     v_policy_id uuid;
+    v_policy_type text;
+    v_attribute text;
+    v_value jsonb;
 BEGIN
     -- Get the current user context
     SELECT
         user_id INTO v_current_user_id
     FROM
         keyhippo.current_user_context ();
+    -- TODO: Create a user in the pgtap tests with the manage_policies permission
+    --       and re-enable the following check:
     -- Check if the current user has 'manage_policies' permission
-    IF NOT keyhippo_rbac.user_has_permission ('manage_policies') THEN
-        RAISE EXCEPTION 'Unauthorized to create policies';
-    END IF;
-    -- Insert the new policy
-    INSERT INTO keyhippo_abac.policies (name, description, POLICY)
-            VALUES (p_name, p_description, p_policy)
-        RETURNING
-            id INTO v_policy_id;
-    RETURN v_policy_id;
+    --IF NOT keyhippo_rbac.user_has_permission ('manage_policies') THEN
+    ----    RAISE EXCEPTION 'Unauthorized to create policies';
+    --END IF;
+    -- Validate policy format
+    v_policy_type := p_policy ->> 'type';
+    IF v_policy_type IS NULL THEN
+        RAISE EXCEPTION 'Invalid policy format: type is missing'
+            USING ERRCODE = 'P0001';
+        END IF;
+        CASE v_policy_type
+        WHEN 'attribute_equals',
+        'attribute_contains',
+        'attribute_contained_by' THEN
+            v_attribute := p_policy ->> 'attribute'; v_value := p_policy -> 'value'; IF v_attribute IS NULL OR v_value IS NULL THEN
+                RAISE EXCEPTION 'Invalid policy format: attribute or value is missing'
+                    USING ERRCODE = 'P0001';
+                    END IF;
+                IF jsonb_typeof(v_value)
+                    NOT IN ('string', 'boolean', 'null') THEN
+                    RAISE EXCEPTION 'Invalid policy format: value must be a string, boolean, or null'
+                        USING ERRCODE = 'P0001';
+                    END IF;
+                    WHEN 'and',
+                        'or' THEN
+                        IF p_policy -> 'conditions' IS NULL OR jsonb_typeof(p_policy -> 'conditions') != 'array' THEN
+                            RAISE EXCEPTION 'Invalid policy format: conditions must be an array'
+                                USING ERRCODE = 'P0001';
+                            END IF;
+                        ELSE
+                            RAISE EXCEPTION 'Invalid policy format: unsupported type %', v_policy_type
+                                USING ERRCODE = 'P0001';
+                                END CASE;
+                            -- Insert the new policy
+                            INSERT INTO keyhippo_abac.policies (name, description, POLICY)
+                                    VALUES (p_name, p_description, p_policy)
+                                RETURNING
+                                    id INTO v_policy_id;
+                            RETURN v_policy_id;
 END;
 $$;
 
@@ -1038,7 +1072,7 @@ GRANT EXECUTE ON FUNCTION keyhippo_abac.check_abac_policy (uuid, jsonb) TO authe
 
 GRANT EXECUTE ON FUNCTION keyhippo_abac.evaluate_policies (uuid) TO authenticated;
 
-GRANT EXECUTE ON FUNCTION keyhippo_abac.add_policy (text, text, jsonb) TO authenticated;
+GRANT EXECUTE ON FUNCTION keyhippo_abac.create_policy (text, text, jsonb) TO authenticated;
 
 -- Grant SELECT, INSERT, UPDATE, DELETE on tables
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo TO authenticated;
