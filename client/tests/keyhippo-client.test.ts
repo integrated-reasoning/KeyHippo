@@ -270,7 +270,6 @@ describe("KeyHippo Client Tests", () => {
   });
 
   it("should reject API keys that exceed the maximum allowed size", async () => {
-    // TODO: Write similar tests for all text fields including RBAC, ABAC metadata
     const oversizedKeyDescription = "A".repeat(5000); // Simulating an oversized key
 
     // Attempt to create an oversized API key
@@ -298,7 +297,7 @@ describe("KeyHippo Client Tests", () => {
     );
   });
 
-    /*
+  // RBAC and ABAC Tests
   describe("KeyHippo Client RBAC and ABAC Tests", () => {
     it("should add user to a group with a role (RBAC)", async () => {
       const groupId = testSetup.adminGroupId;
@@ -314,12 +313,12 @@ describe("KeyHippo Client Tests", () => {
       // Query claims cache directly to verify
       const claimsCacheResult = await testSetup.serviceSupabase
         .schema("keyhippo_rbac")
-        .from("claims_cache")
+        .from(".claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
 
-      console.log("RBAC Claims:", claimsCacheResult.data!.rbac_claims);
+      console.log("RBAC Claims:", claimsCacheResult.data);
 
       expect(claimsCacheResult.data).toBeDefined();
       expect(claimsCacheResult.data!.rbac_claims).toBeDefined();
@@ -336,8 +335,7 @@ describe("KeyHippo Client Tests", () => {
 
       // Instead of checking the returned data, verify the role hierarchy directly
       const roleHierarchy = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("roles")
+        .from("keyhippo_rbac.roles")
         .select("parent_role_id")
         .eq("id", childRoleId)
         .single();
@@ -355,8 +353,7 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify the parent role assignment
       const parentRoleResult = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("roles")
+        .from("keyhippo_rbac.roles")
         .select("parent_role_id")
         .eq("id", childRoleId)
         .single();
@@ -364,17 +361,13 @@ describe("KeyHippo Client Tests", () => {
       expect(parentRoleResult.data).toBeDefined();
       expect(parentRoleResult.data!.parent_role_id).toBe(parentRoleId);
     });
-    */
 
-    /*
     it("should not rotate an API key if the user does not have the right role", async () => {
       const keyDescription = "Key to Rotate with Role Check";
 
       // Create API key
-      const createdKeyInfo = await testSetup.keyHippo.createApiKey(
-        testSetup.userId,
-        keyDescription,
-      );
+      const createdKeyInfo =
+        await testSetup.keyHippo.createApiKey(keyDescription);
 
       // Assign a role that doesn't have permission to rotate keys
       await testSetup.keyHippo.addUserToGroup(
@@ -385,7 +378,7 @@ describe("KeyHippo Client Tests", () => {
 
       // Attempt to rotate the API key
       await expect(
-        testSetup.keyHippo.rotateApiKey(testSetup.userId, createdKeyInfo.id),
+        testSetup.keyHippo.rotateApiKey(createdKeyInfo.id),
       ).rejects.toThrow("Unauthorized");
     });
 
@@ -404,11 +397,13 @@ describe("KeyHippo Client Tests", () => {
 
     it("should ensure a role without a parent does not inherit higher privileges", async () => {
       const roleName = "Test Role Without Parent";
-      const childRoleId = await testSetup.keyHippo.createRole(roleName);
+      const groupId = testSetup.userGroupId; // Provide appropriate group ID
+      // Assuming there's a method to create a role; implement if necessary
+      const newRoleId = await testSetup.keyHippo.createRole(roleName, groupId);
 
       // Attempt to evaluate permissions for a role without a parent
       const rolePermissions =
-        await testSetup.keyHippo.getRolePermissions(childRoleId);
+        await testSetup.keyHippo.getRolePermissions(newRoleId);
 
       expect(rolePermissions).toBeDefined();
       expect(rolePermissions.length).toBe(0); // No permissions should be inherited
@@ -427,8 +422,7 @@ describe("KeyHippo Client Tests", () => {
       }
 
       const claimsCacheResult = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("claims_cache")
+        .from("keyhippo_rbac.claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -440,9 +434,7 @@ describe("KeyHippo Client Tests", () => {
         ).toContain(role);
       }
     });
-    */
 
-   /*
     it("should create an ABAC policy", async () => {
       const policyName = "test-policy";
       const description = "Test Policy Description";
@@ -456,15 +448,14 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify the policy creation in the database
       const createdPolicy = await testSetup.serviceSupabase
-        .schema("keyhippo_abac")
-        .from("policies")
+        .from("keyhippo_abac.policies")
         .select("*")
         .eq("name", policyName)
         .single();
 
       expect(createdPolicy.data).toBeDefined();
       expect(createdPolicy.data.description).toBe(description);
-      expect(JSON.parse(createdPolicy.data.policy)).toEqual(policy);
+      expect(createdPolicy.data.policy).toEqual(policy);
     });
 
     it("should create and retrieve a policy (ABAC)", async () => {
@@ -480,8 +471,7 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify the policy was created
       const createdPolicy = await testSetup.serviceSupabase
-        .schema("keyhippo_abac")
-        .from("policies")
+        .from("keyhippo_abac.policies")
         .select("description, policy")
         .eq("name", "Test Policy")
         .single();
@@ -490,7 +480,7 @@ describe("KeyHippo Client Tests", () => {
 
       expect(createdPolicy.data).toBeDefined();
       expect(createdPolicy.data!.description).toBe(description);
-      expect(JSON.parse(createdPolicy.data!.policy)).toEqual(policy);
+      expect(createdPolicy.data!.policy).toEqual(policy);
     });
 
     it("should evaluate ABAC policies for a user", async () => {
@@ -540,9 +530,7 @@ describe("KeyHippo Client Tests", () => {
 
       expect(attributeValue).toEqual(expectedValue);
     });
-    */
 
-    /*
     it("should evaluate policies with multiple attributes correctly", async () => {
       const policy = {
         type: "attribute_equals",
@@ -586,9 +574,7 @@ describe("KeyHippo Client Tests", () => {
       );
       expect(result).toBe(true); // Both policies should be satisfied
     });
-   */
 
-  /*
     it("should fail when creating a duplicate policy", async () => {
       const policyName = "duplicate-policy";
       const description = "Duplicate Policy";
@@ -601,13 +587,14 @@ describe("KeyHippo Client Tests", () => {
       // Create the policy once
       await testSetup.keyHippo.createPolicy(policyName, description, policy);
 
-      // Try creating the same policy again, expecting no error due to ON CONFLICT DO NOTHING
-      await testSetup.keyHippo.createPolicy(policyName, description, policy);
+      // Try creating the same policy again, expecting no error due to unique constraint
+      await expect(
+        testSetup.keyHippo.createPolicy(policyName, description, policy),
+      ).rejects.toThrow("duplicate key value violates unique constraint");
 
       // Verify that only one policy exists
       const policies = await testSetup.serviceSupabase
-        .schema("keyhippo_abac")
-        .from("policies")
+        .from("keyhippo_abac.policies")
         .select("*")
         .eq("name", policyName);
 
@@ -629,6 +616,12 @@ describe("KeyHippo Client Tests", () => {
       );
 
       // Ensure the user has no 'location' attribute
+      await testSetup.keyHippo.setUserAttribute(
+        testSetup.userId,
+        "location",
+        null,
+      );
+
       const result = await testSetup.keyHippo.evaluatePolicies(
         testSetup.userId,
       );
@@ -651,16 +644,34 @@ describe("KeyHippo Client Tests", () => {
       );
 
       // User doesn't have the 'department' attribute set
-      await expect(
-        testSetup.keyHippo.evaluatePolicies(testSetup.userId),
-      ).resolves.toBe(false); // Expect the policy evaluation to fail
+      await testSetup.keyHippo.setUserAttribute(
+        testSetup.userId,
+        "department",
+        null,
+      );
+
+      const result = await testSetup.keyHippo.evaluatePolicies(
+        testSetup.userId,
+      );
+
+      expect(result).toBe(false); // Expect the policy evaluation to fail
     });
 
     it("should evaluate policies with multiple attributes", async () => {
       const multiAttributePolicy = {
-        type: "attribute_equals",
-        attribute: "role",
-        value: "manager",
+        type: "and",
+        conditions: [
+          {
+            type: "attribute_equals",
+            attribute: "role",
+            value: "manager",
+          },
+          {
+            type: "attribute_equals",
+            attribute: "department",
+            value: "engineering",
+          },
+        ],
       };
 
       await testSetup.keyHippo.createPolicy(
@@ -710,34 +721,35 @@ describe("KeyHippo Client Tests", () => {
     });
 
     it("should allow assigning multiple roles to the same user", async () => {
-      const adminRoleId = testSetup.adminRoleId;
-      const userRoleId = testSetup.userRoleId;
+      const adminGroupId = testSetup.adminGroupId;
+      const userGroupId = testSetup.userGroupId;
+      const adminRoleName = "Admin";
+      const userRoleName = "User";
 
       // Assign both Admin and User roles to the same user
       await testSetup.keyHippo.addUserToGroup(
         testSetup.userId,
-        testSetup.adminGroupId,
-        "Admin",
+        adminGroupId,
+        adminRoleName,
       );
       await testSetup.keyHippo.addUserToGroup(
         testSetup.userId,
-        testSetup.userGroupId,
-        "User",
+        userGroupId,
+        userRoleName,
       );
 
       // Query claims cache directly to verify
       const claimsCache = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("claims_cache")
+        .from("keyhippo_rbac.claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
 
-      expect(claimsCache.data!.rbac_claims[testSetup.adminGroupId]).toContain(
-        "Admin",
+      expect(claimsCache.data!.rbac_claims[adminGroupId]).toContain(
+        adminRoleName,
       );
-      expect(claimsCache.data!.rbac_claims[testSetup.userGroupId]).toContain(
-        "User",
+      expect(claimsCache.data!.rbac_claims[userGroupId]).toContain(
+        userRoleName,
       );
     });
 
@@ -774,9 +786,7 @@ describe("KeyHippo Client Tests", () => {
       );
       expect(result).toBe(false);
     });
-    */
 
-    /*
     it("should fail policy evaluation after revoking group attributes", async () => {
       const policy = {
         type: "attribute_equals",
@@ -891,8 +901,7 @@ describe("KeyHippo Client Tests", () => {
 
       // Check that the claims cache reflects the new role
       const claimsCache = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("claims_cache")
+        .from("keyhippo_rbac.claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -950,29 +959,30 @@ describe("KeyHippo Client Tests", () => {
     });
 
     it("should revoke multiple roles from a user", async () => {
-      const adminRoleId = testSetup.adminRoleId;
-      const userRoleId = testSetup.userRoleId;
+      const adminGroupId = testSetup.adminGroupId;
+      const userGroupId = testSetup.userGroupId;
+      const adminRoleName = "Admin";
+      const userRoleName = "User";
 
       // Assign Admin and User roles to the user
       await testSetup.keyHippo.addUserToGroup(
         testSetup.userId,
-        testSetup.adminGroupId,
-        "Admin",
+        adminGroupId,
+        adminRoleName,
       );
       await testSetup.keyHippo.addUserToGroup(
         testSetup.userId,
-        testSetup.userGroupId,
-        "User",
+        userGroupId,
+        userRoleName,
       );
 
-      // Revoke both roles
-      await testSetup.keyHippo.setParentRole(userRoleId, "");
-      await testSetup.keyHippo.setParentRole(adminRoleId, "");
+      // Revoke both roles by setting parent_role_id to null
+      await testSetup.keyHippo.setParentRole(testSetup.adminRoleId, null);
+      await testSetup.keyHippo.setParentRole(testSetup.userRoleId, null);
 
       // Verify both roles are revoked
       const claimsCache = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("claims_cache")
+        .from("keyhippo_rbac.claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -989,8 +999,7 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify the child role inherits the permissions of the parent role
       const claimsCache = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("claims_cache")
+        .from("keyhippo_rbac.claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -1011,12 +1020,11 @@ describe("KeyHippo Client Tests", () => {
       );
 
       // Revoke the role
-      await testSetup.keyHippo.setParentRole(testSetup.adminRoleId, "");
+      await testSetup.keyHippo.setParentRole(testSetup.adminRoleId, null);
 
       // Check that the claims cache no longer contains the Admin role
       const claimsCache = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("claims_cache")
+        .from("keyhippo_rbac.claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -1143,6 +1151,99 @@ describe("KeyHippo Client Tests", () => {
         ),
       ).rejects.toThrow("Invalid policy format");
     });
+
+    it("should create and evaluate policies with 'or' conditions", async () => {
+      const orPolicy = {
+        type: "or",
+        conditions: [
+          {
+            type: "attribute_equals",
+            attribute: "role",
+            value: "admin",
+          },
+          {
+            type: "attribute_equals",
+            attribute: "department",
+            value: "engineering",
+          },
+        ],
+      };
+
+      await testSetup.keyHippo.createPolicy(
+        "Or Condition Policy",
+        "User must be admin or in engineering",
+        orPolicy,
+      );
+
+      // Set the user's role to admin
+      await testSetup.keyHippo.setUserAttribute(
+        testSetup.userId,
+        "role",
+        "admin",
+      );
+
+      const result = await testSetup.keyHippo.evaluatePolicies(
+        testSetup.userId,
+      );
+      expect(result).toBe(true);
+
+      // Change the user's role to non-admin but set department to engineering
+      await testSetup.keyHippo.setUserAttribute(
+        testSetup.userId,
+        "role",
+        "user",
+      );
+      await testSetup.keyHippo.setUserAttribute(
+        testSetup.userId,
+        "department",
+        "engineering",
+      );
+
+      const secondResult = await testSetup.keyHippo.evaluatePolicies(
+        testSetup.userId,
+      );
+      expect(secondResult).toBe(true);
+    });
+
+    it("should reject policy evaluation for user with insufficient attributes", async () => {
+      const policy = {
+        type: "and",
+        conditions: [
+          {
+            type: "attribute_equals",
+            attribute: "department",
+            value: "engineering",
+          },
+          {
+            type: "attribute_equals",
+            attribute: "level",
+            value: "senior",
+          },
+        ],
+      };
+
+      await testSetup.keyHippo.createPolicy(
+        "Senior Engineering Policy",
+        "Access restricted to senior engineers",
+        policy,
+      );
+
+      // Set only one attribute
+      await testSetup.keyHippo.setUserAttribute(
+        testSetup.userId,
+        "department",
+        "engineering",
+      );
+      await testSetup.keyHippo.setUserAttribute(
+        testSetup.userId,
+        "level",
+        null,
+      );
+
+      const result = await testSetup.keyHippo.evaluatePolicies(
+        testSetup.userId,
+      );
+      expect(result).toBe(false);
+    });
   });
-  */
 });
