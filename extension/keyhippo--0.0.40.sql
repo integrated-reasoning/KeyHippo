@@ -477,6 +477,37 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION keyhippo.add_user_to_group (p_user_id uuid, p_group_id uuid, p_role_name text)
+    RETURNS void
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_temp
+    AS $$
+DECLARE
+    v_role_id uuid;
+BEGIN
+    -- Retrieve the role ID based on the role name and group ID
+    SELECT
+        id INTO v_role_id
+    FROM
+        keyhippo_rbac.roles
+    WHERE
+        name = p_role_name
+        AND group_id = p_group_id;
+    IF v_role_id IS NULL THEN
+        RAISE EXCEPTION 'Role % not found in Group %', p_role_name, p_group_id;
+    END IF;
+    -- Insert or update the user_group_roles table
+    INSERT INTO keyhippo_rbac.user_group_roles (user_id, group_id, role_id)
+        VALUES (p_user_id, p_group_id, v_role_id)
+    ON CONFLICT (user_id, group_id, role_id)
+        DO NOTHING;
+    -- Update the claims cache
+    PERFORM
+        keyhippo_rbac.update_user_claims_cache (p_user_id);
+END;
+$$;
+
 -- Grant necessary permissions
 GRANT EXECUTE ON FUNCTION keyhippo.revoke_api_key (uuid) TO authenticated;
 
