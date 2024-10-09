@@ -802,18 +802,54 @@ BEGIN
         keyhippo_abac.user_attributes
     WHERE
         user_id = p_user_id;
+    -- If user attributes are not found, return FALSE immediately
+    IF v_user_attributes IS NULL THEN
+        RETURN FALSE;
+    END IF;
     -- Extract policy details
     v_policy_type := p_policy ->> 'type';
+    -- Handle 'and' and 'or' policy types
+    IF v_policy_type = 'and' OR v_policy_type = 'or' THEN
+        DECLARE v_result boolean;
+        i integer;
+        BEGIN
+            v_result := (v_policy_type = 'and');
+            FOR i IN 0..jsonb_array_length(p_policy -> 'conditions') - 1 LOOP
+                IF v_policy_type = 'and' THEN
+                    v_result := v_result
+                        AND keyhippo_abac.check_abac_policy (p_user_id, p_policy -> 'conditions' -> i);
+                    EXIT
+                    WHEN NOT v_result;
+                ELSIF v_policy_type = 'or' THEN
+                    v_result := v_result
+                        OR keyhippo_abac.check_abac_policy (p_user_id, p_policy -> 'conditions' -> i);
+                    EXIT
+                    WHEN v_result;
+                END IF;
+            END LOOP;
+            RETURN v_result;
+        END;
+    END IF;
+    -- Handle attribute-based policy types
     v_policy_attribute := p_policy ->> 'attribute';
     v_policy_value := p_policy -> 'value';
     -- Get the user's attribute value
     v_user_attribute_value := v_user_attributes -> v_policy_attribute;
     -- Check policy
     IF v_policy_type = 'attribute_equals' THEN
+        IF v_user_attribute_value IS NULL THEN
+            RETURN FALSE;
+        END IF;
         RETURN v_user_attribute_value = v_policy_value;
     ELSIF v_policy_type = 'attribute_contains' THEN
+        IF v_user_attribute_value IS NULL THEN
+            RETURN FALSE;
+        END IF;
         RETURN v_user_attribute_value @> v_policy_value;
     ELSIF v_policy_type = 'attribute_contained_by' THEN
+        IF v_user_attribute_value IS NULL THEN
+            RETURN FALSE;
+        END IF;
         RETURN v_user_attribute_value <@ v_policy_value;
     ELSE
         RAISE EXCEPTION 'Unsupported policy type: %', v_policy_type;
