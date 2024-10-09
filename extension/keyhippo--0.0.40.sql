@@ -588,6 +588,59 @@ END IF;
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION keyhippo_rbac.set_parent_role (p_child_role_id uuid, p_new_parent_role_id uuid)
+    RETURNS TABLE (
+        updated_parent_role_id uuid)
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_temp
+    AS $$
+DECLARE
+    v_parent_role_id uuid;
+BEGIN
+    -- Prevent circular hierarchy
+    IF p_new_parent_role_id IS NOT NULL THEN
+        IF EXISTS ( WITH RECURSIVE role_hierarchy AS (
+                SELECT
+                    r.id,
+                    r.parent_role_id
+                FROM
+                    keyhippo_rbac.roles r
+                WHERE
+                    r.id = p_new_parent_role_id
+                UNION
+                SELECT
+                    r.id,
+                    r.parent_role_id
+                FROM
+                    keyhippo_rbac.roles r
+                    INNER JOIN role_hierarchy rh ON r.id = rh.parent_role_id
+)
+                SELECT
+                    1
+                FROM
+                    role_hierarchy
+                WHERE
+                    id = p_child_role_id) THEN
+            RAISE EXCEPTION 'Circular role hierarchy detected';
+    END IF;
+END IF;
+    -- Set the parent role
+    UPDATE
+        keyhippo_rbac.roles
+    SET
+        parent_role_id = p_new_parent_role_id
+    WHERE
+        id = p_child_role_id
+    RETURNING
+        keyhippo_rbac.roles.parent_role_id INTO v_parent_role_id;
+    -- Return the updated parent_role_id
+    RETURN QUERY
+    SELECT
+        v_parent_role_id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION keyhippo_rbac.create_role (p_role_name text, p_group_id uuid, p_description text)
     RETURNS TABLE (
         role_id uuid)
