@@ -22,6 +22,16 @@ export type ApiKeyId = string;
 export type UserId = string;
 
 /**
+ * The unique identifier of a group.
+ */
+export type GroupId = string;
+
+/**
+ * The unique identifier of a role.
+ */
+export type RoleId = string;
+
+/**
  * The unique identifier of a scope.
  */
 export type ScopeId = string;
@@ -45,6 +55,11 @@ export type Name = string;
  * A message string.
  */
 export type Message = string;
+
+/**
+ * The unique identifier of a policy.
+ */
+export type PolicyId = string;
 
 // Utility types
 /**
