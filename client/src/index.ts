@@ -24,6 +24,8 @@ import {
   ApiKeyId,
   Description,
   RotateApiKeyResult,
+  GroupId,
+  RoleId,
 } from "./types";
 
 /**
@@ -373,7 +375,7 @@ export class KeyHippo {
    */
   async addUserToGroup(
     userId: UserId,
-    groupId: string,
+    groupId: GroupId,
     roleName: string,
   ): Promise<void> {
     try {
@@ -428,9 +430,9 @@ export class KeyHippo {
    */
   /* // TODO
   async setParentRole(
-    childRoleId: string,
-    parentRoleId: string | null,
-  ): Promise<{ parent_role_id: string | null }> {
+    childRoleId: RoleId,
+    parentRoleId: RoleId|null,
+  ): Promise<{ parent_role_id: RoleId }> {
     try {
       return await setParentRole(
         this.supabase,
