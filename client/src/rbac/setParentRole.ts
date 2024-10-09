@@ -1,126 +1,124 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger } from "../types";
+import { Logger, RoleId } from "../types";
 import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
 
 /**
- * Logs the attempt to set a parent role for a child role.
+ * Logs the attempt to set a parent role.
  * @param logger - The logger instance used for logging.
  * @param childRoleId - The ID of the child role.
- * @param parentRoleId - The ID of the parent role to be set.
+ * @param parentRoleId - The ID of the parent role or null to remove the parent.
  */
 const logSetParentRoleAttempt = (
   logger: Logger,
-  childRoleId: string,
-  parentRoleId: string,
+  childRoleId: RoleId,
+  parentRoleId: RoleId|null,
 ): void => {
   logDebug(
     logger,
-    `Setting parent role for child role ${childRoleId} to ${parentRoleId}`,
+    `Attempting to set parent role. Child Role ID: ${childRoleId}, Parent Role ID: ${parentRoleId}`,
   );
 };
 
 /**
- * Executes the database update to set the parent role for a child role.
+ * Executes the RPC call to set the parent role in the database.
  * @param supabase - The Supabase client instance.
  * @param childRoleId - The ID of the child role.
- * @param parentRoleId - The ID of the parent role to be set.
- * @returns A promise that resolves when the update is successful.
- * @throws Error if the database update fails.
+ * @param parentRoleId - The ID of the parent role or null to remove the parent.
+ * @returns A promise that resolves with the new parent_role_id or null if removed.
+ * @throws Error if the RPC call fails to set the parent role.
  */
-const executeUpdateParentRole = async (
+const executeSetParentRoleRpc = async (
   supabase: SupabaseClient<any, "public", any>,
-  childRoleId: string,
-  parentRoleId: string,
-): Promise<void> => {
-  const { error } = await supabase
-    .from("roles")
-    .update({ parent_role_id: parentRoleId })
-    .eq("id", childRoleId);
+  childRoleId: RoleId,
+  parentRoleId: RoleId|null,
+): Promise<{ parent_role_id: RoleId }> => {
+  const { data, error } = await supabase
+    .schema("keyhippo_rbac")
+    .rpc("set_parent_role", {
+      child_role_id: childRoleId,
+      parent_role_id: parentRoleId,
+    })
+    .single<{ parent_role_id: RoleId }>();
 
   if (error) {
-    throw new Error(`Failed to update parent role: ${error.message}`);
+    throw new Error(`Set Parent Role RPC failed: ${error.message}`);
   }
-};
 
-/**
- * Fetches the updated parent role information for a child role.
- * @param supabase - The Supabase client instance.
- * @param childRoleId - The ID of the child role.
- * @returns A promise that resolves with the updated parent role ID.
- * @throws Error if fetching the updated role information fails.
- */
-const fetchUpdatedRoleInfo = async (
-  supabase: SupabaseClient<any, "public", any>,
-  childRoleId: string,
-): Promise<{ parent_role_id: string | null }> => {
-  const { data, error } = await supabase
-    .from("roles")
-    .select("parent_role_id")
-    .eq("id", childRoleId)
-    .single();
-
-  if (error || !data) {
-    throw new Error(
-      `Failed to fetch updated role: ${
-        error ? error.message : "No data returned"
-      }`,
-    );
+  if (!data) {
+    throw new Error("Invalid data returned from set_parent_role RPC");
   }
 
   return { parent_role_id: data.parent_role_id };
 };
 
 /**
- * Logs the successful setting of a parent role for a child role.
+ * Logs the successful setting of a parent role.
  * @param logger - The logger instance used for logging.
  * @param childRoleId - The ID of the child role.
- * @param parentRoleId - The ID of the parent role that was set.
+ * @param parentRoleId - The ID of the parent role or null if removed.
  */
-const logParentRoleSet = (
+const logSetParentRoleSuccess = (
   logger: Logger,
-  childRoleId: string,
-  parentRoleId: string | null,
+  childRoleId: RoleId,
+  parentRoleId: RoleId|null,
 ): void => {
-  logInfo(
-    logger,
-    `Parent role set for child role ${childRoleId}: ${parentRoleId}`,
-  );
+  if (parentRoleId) {
+    logInfo(
+      logger,
+      `Successfully set parent role. Child Role ID: ${childRoleId}, Parent Role ID: ${parentRoleId}`,
+    );
+  } else {
+    logInfo(
+      logger,
+      `Successfully removed parent role. Child Role ID: ${childRoleId}`,
+    );
+  }
 };
 
 /**
- * Handles errors that occur during the process of setting a parent role.
+ * Handles errors that occur during the set parent role process.
  * @param error - The error encountered during the process.
  * @param logger - The logger instance used for logging errors.
- * @throws AppError encapsulating the original error with a descriptive message.
+ * @throws ApplicationError encapsulating the original error with a descriptive message.
  */
-const handleSetParentRoleError = (error: unknown, logger: Logger): never => {
-  logError(logger, `Failed to set parent role: ${error}`);
+const handleSetParentRoleError = (
+  error: unknown,
+  logger: Logger,
+  childRoleId: RoleId,
+  parentRoleId: RoleId|null,
+): never => {
+  logError(
+    logger,
+    `Failed to set parent role for Child Role ID: ${childRoleId}, Parent Role ID: ${parentRoleId}. Error: ${error}`,
+  );
   throw createDatabaseError(`Failed to set parent role: ${error}`);
 };
 
 /**
- * Sets the parent role for a child role.
- * @param supabase - The Supabase client used to interact with the database.
+ * Sets a parent role for a specified child role.
+ * @param supabase - The Supabase client.
  * @param childRoleId - The ID of the child role.
- * @param parentRoleId - The ID of the parent role to be set.
- * @param logger - The logger instance used for logging events and errors.
- * @returns A promise that resolves with an object containing the parent role ID.
- * @throws AppError if the setting process fails.
+ * @param parentRoleId - The ID of the parent role or null to remove the parent.
+ * @param logger - The logger instance.
+ * @returns An object containing the new parent_role_id or null if removed.
+ * @throws ApplicationError if the process fails.
  */
 export const setParentRole = async (
   supabase: SupabaseClient<any, "public", any>,
-  childRoleId: string,
-  parentRoleId: string,
+  childRoleId: RoleId,
+  parentRoleId: RoleId|null,
   logger: Logger,
-): Promise<{ parent_role_id: string | null }> => {
+): Promise<{ parent_role_id: RoleId }> => {
   try {
     logSetParentRoleAttempt(logger, childRoleId, parentRoleId);
-    await executeUpdateParentRole(supabase, childRoleId, parentRoleId);
-    const updatedRole = await fetchUpdatedRoleInfo(supabase, childRoleId);
-
-    logParentRoleSet(logger, childRoleId, updatedRole.parent_role_id);
-    return updatedRole;
+    const result = await executeSetParentRoleRpc(
+      supabase,
+      childRoleId,
+      parentRoleId,
+    );
+    logSetParentRoleSuccess(logger, childRoleId, parentRoleId);
+    return result;
   } catch (error) {
-    return handleSetParentRoleError(error, logger);
+    return handleSetParentRoleError(error, logger, childRoleId, parentRoleId);
   }
 };
