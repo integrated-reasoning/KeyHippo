@@ -65,43 +65,44 @@ export type PolicyId = string;
 /**
  * Makes a type optional by allowing it to be null.
  */
-type Optional<T> = T | null;
+export type Optional<T> = T | null;
 
 /**
  * Makes specified properties of a type optional.
  */
-type WithOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+export type WithOptional<T, K extends keyof T> = Omit<T, K> &
+  Partial<Pick<T, K>>;
 
 // Status types
 /**
  * The status of an operation.
  */
-type OperationStatus = "success" | "failed";
+export type OperationStatus = "success" | "failed";
 
 /**
  * The status of an API key.
  */
-type ApiKeyStatus = OperationStatus;
+export type ApiKeyStatus = OperationStatus;
 
-// Common fields
+// Common interfaces
 /**
  * Interface for objects that have a creation timestamp.
  */
-interface Timestamped {
+export interface Timestamped {
   createdAt: Timestamp;
 }
 
 /**
  * Interface for objects that have a unique identifier.
  */
-interface Identifiable {
+export interface Identifiable {
   id: ApiKeyId;
 }
 
 /**
  * Interface for objects that have a description.
  */
-interface Describable {
+export interface Describable {
   description: Description;
 }
 
@@ -109,7 +110,7 @@ interface Describable {
 /**
  * Base interface for API key related types.
  */
-interface ApiKeyBase extends Identifiable, Describable {}
+export interface ApiKeyBase extends Identifiable, Describable {}
 
 /**
  * A summarized view of an API key.
@@ -119,7 +120,7 @@ export type ApiKeySummary = ApiKeyBase;
 /**
  * Interface for API key metadata fields.
  */
-interface ApiKeyMetadataFields {
+export interface ApiKeyMetadataFields {
   name: Name;
   permission: Permission;
   lastUsedAt: Timestamp;
@@ -150,7 +151,7 @@ export interface ApiKeyEntity extends ApiKeySummary {
 /**
  * Interface for the result of an operation.
  */
-interface OperationResult {
+export interface OperationResult {
   success: boolean;
   error?: Message;
   message?: Message;
@@ -159,24 +160,24 @@ interface OperationResult {
 /**
  * The result of an API key operation.
  */
-export type ApiKeyOperationResult = OperationResult & {
+export interface ApiKeyOperationResult extends OperationResult {
   apiKey?: ApiKeyText;
-};
+}
 
 /**
  * The result of rotating an API key.
  */
-export type RotateApiKeyResult = {
+export interface RotateApiKeyResult {
   apiKey: ApiKeyText;
   id: ApiKeyId;
   status: OperationStatus;
-};
+}
 
 // Error types
 /**
  * The types of application errors.
  */
-type ErrorType =
+export type ErrorType =
   | "DatabaseError"
   | "UnauthorizedError"
   | "ValidationError"
@@ -194,15 +195,17 @@ export type ApplicationError = {
 /**
  * The result of an authentication operation.
  */
-export type AuthenticationResult = {
+export interface AuthenticationResult {
   userId: UserId;
   supabase: SupabaseClient<any, "public", any>;
-};
+}
 
-// Authorization types
-export type AuthResult = {
+/**
+ * The result of an authentication operation.
+ */
+export interface AuthResult {
   /**
-   * An array containing the authentication result.
+   * Authentication details.
    */
   auth: {
     /**
@@ -222,13 +225,13 @@ export type AuthResult = {
    * The authenticated Supabase client instance.
    */
   supabase: SupabaseClient;
-};
+}
 
 // Logger interface
 /**
  * The available log levels.
  */
-type LogLevel = "info" | "warn" | "error" | "debug";
+export type LogLevel = "info" | "warn" | "error" | "debug";
 
 /**
  * Interface for a logger with methods for different log levels.
