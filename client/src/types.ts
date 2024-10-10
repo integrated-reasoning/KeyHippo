@@ -47,6 +47,11 @@ export type Description = string;
 export type Permission = string;
 
 /**
+ * A permission name
+ */
+export type PermissionName = string;
+
+/**
  * A name or title.
  */
 export type Name = string;
@@ -60,6 +65,11 @@ export type Message = string;
  * The unique identifier of a policy.
  */
 export type PolicyId = string;
+
+/**
+ * The unique identifier of a permission.
+ */
+export type PermissionId = string;
 
 // Utility types
 /**

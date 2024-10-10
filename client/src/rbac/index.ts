@@ -4,3 +4,4 @@ export * from "./getParentRole";
 export * from "./getRolePermissions";
 export * from "./setParentRole";
 export * from "./updateUserClaimsCache";
+export * from "./userHasPermission";

@@ -13,6 +13,7 @@ import {
   setParentRole,
   getRolePermissions,
   updateUserClaimsCache,
+  userHasPermission,
 } from "./rbac";
 import {
   createPolicy,
@@ -877,6 +878,54 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error setting group attribute: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Checks if the current user has a specific permission.
+   *
+   * @param permissionName - The name of the permission to check.
+   * @returns A Promise resolving to a boolean indicating whether the user has the specified permission.
+   *
+   * This method involves the following steps:
+   * 1. Calls the 'user_has_permission' function with the provided permissionName.
+   * 2. Verifies the user's permissions against the RBAC schema.
+   * 3. Returns true if the user has the permission, false otherwise.
+   *
+   * Security implications:
+   * - This method should be used to enforce access control throughout the application.
+   * - It's crucial for maintaining the principle of least privilege.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const canRotateKey = await keyHippo.userHasPermission('rotate_api_key');
+   *   if (canRotateKey) {
+   *     console.log('User can rotate API keys');
+   *   } else {
+   *     console.log('User does not have permission to rotate API keys');
+   *   }
+   * } catch (error) {
+   *   console.error('Failed to check user permission:', error);
+   * }
+   * ```
+   *
+   * Error handling:
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the permission check fails for any reason.
+   */
+  async userHasPermission(permissionName: string): Promise<boolean> {
+    try {
+      return await userHasPermission(
+        this.supabase,
+        permissionName,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error checking user permission: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
