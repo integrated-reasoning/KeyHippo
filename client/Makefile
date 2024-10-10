@@ -86,6 +86,12 @@ pg_tap:
 	@echo "Running pg_tap tests..."
 	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/tests.sql
 
+# Run benchmark
+.PHONY: benchmark
+benchmark:
+	@echo "Running benchmark..."
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/bench.sql
+
 # Run tests with coverage (including Supabase setup and migrations)
 .PHONY: test
 test: install setup-supabase apply-integration-test-migrations pg_tap
