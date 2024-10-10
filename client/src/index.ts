@@ -399,6 +399,59 @@ export class KeyHippo {
   }
 
   /**
+   * Assigns a permission to a role in the RBAC system.
+   *
+   * @param roleId - The unique identifier of the role to which the permission is being assigned.
+   * @param permissionName - The name of the permission to be assigned.
+   * @returns A Promise that resolves when the assignment is successful.
+   *
+   * Permission assignment process:
+   * 1. Validates the input parameters.
+   * 2. Checks if the role and permission exist.
+   * 3. Creates an entry in the role_permissions table within the RBAC schema.
+   * 4. Handles potential conflicts (e.g., if the permission is already assigned to the role).
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   await keyHippo.assignPermissionToRole('role123', 'READ_DOCUMENTS');
+   *   console.log('Permission successfully assigned to role');
+   * } catch (error) {
+   *   console.error('Failed to assign permission to role:', error);
+   * }
+   * ```
+
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can assign permissions to roles.
+   * - Assigning permissions affects the overall access control structure of the application.
+   * - Consider implementing an audit log for permission assignments.
+   *
+   * Error handling:
+   * - Throws an error if the role or permission does not exist.
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the permission is already assigned to the role.
+   */
+  async assignPermissionToRole(
+    roleId: RoleId,
+    permissionName: PermissionName,
+  ): Promise<void> {
+    try {
+      await assignPermissionToRole(
+        this.supabase,
+        roleId,
+        permissionName,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error assigning permission to role: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Adds a user to a specified group with a given role.
    *
    * @param userId - The unique identifier of the user being added to the group.
