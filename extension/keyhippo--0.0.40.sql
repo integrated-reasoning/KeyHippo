@@ -1267,3 +1267,285 @@ WHERE
 ON CONFLICT (role_id,
     permission_id)
     DO NOTHING;
+
+----------------------------------------------------------------------------
+-- Permissions CRUD
+-- Create
+CREATE OR REPLACE FUNCTION keyhippo_rbac.create_permission (p_name text, p_description text)
+    RETURNS uuid
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_permission_id uuid;
+BEGIN
+    INSERT INTO keyhippo_rbac.permissions (name, description)
+        VALUES (p_name, p_description)
+    RETURNING
+        id INTO v_permission_id;
+    RETURN v_permission_id;
+END;
+$$;
+
+-- Read
+CREATE OR REPLACE FUNCTION keyhippo_rbac.get_permission (p_permission_id uuid)
+    RETURNS TABLE (
+        id uuid,
+        name text,
+        description text)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        id,
+        name,
+        description
+    FROM
+        keyhippo_rbac.permissions
+    WHERE
+        id = p_permission_id;
+$$;
+
+-- Update
+CREATE OR REPLACE FUNCTION keyhippo_rbac.update_permission (p_permission_id uuid, p_name text, p_description text)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        keyhippo_rbac.permissions
+    SET
+        name = p_name,
+        description = p_description
+    WHERE
+        id = p_permission_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Delete
+CREATE OR REPLACE FUNCTION keyhippo_rbac.delete_permission (p_permission_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM keyhippo_rbac.permissions
+    WHERE id = p_permission_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Roles CRUD
+-- Create
+CREATE OR REPLACE FUNCTION keyhippo_rbac.create_role (p_name text, p_description text, p_group_id uuid)
+    RETURNS uuid
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_role_id uuid;
+BEGIN
+    INSERT INTO keyhippo_rbac.roles (name, description, group_id)
+        VALUES (p_name, p_description, p_group_id)
+    RETURNING
+        id INTO v_role_id;
+    RETURN v_role_id;
+END;
+$$;
+
+-- Read
+CREATE OR REPLACE FUNCTION keyhippo_rbac.get_role (p_role_id uuid)
+    RETURNS TABLE (
+        id uuid,
+        name text,
+        description text,
+        group_id uuid)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        id,
+        name,
+        description,
+        group_id
+    FROM
+        keyhippo_rbac.roles
+    WHERE
+        id = p_role_id;
+$$;
+
+-- Update
+CREATE OR REPLACE FUNCTION keyhippo_rbac.update_role (p_role_id uuid, p_name text, p_description text)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        keyhippo_rbac.roles
+    SET
+        name = p_name,
+        description = p_description
+    WHERE
+        id = p_role_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Delete
+CREATE OR REPLACE FUNCTION keyhippo_rbac.delete_role (p_role_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM keyhippo_rbac.roles
+    WHERE id = p_role_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Groups CRUD
+-- Create
+CREATE OR REPLACE FUNCTION keyhippo_rbac.create_group (p_name text, p_description text)
+    RETURNS uuid
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_group_id uuid;
+BEGIN
+    INSERT INTO keyhippo_rbac.groups (name, description)
+        VALUES (p_name, p_description)
+    RETURNING
+        id INTO v_group_id;
+    RETURN v_group_id;
+END;
+$$;
+
+-- Read
+CREATE OR REPLACE FUNCTION keyhippo_rbac.get_group (p_group_id uuid)
+    RETURNS TABLE (
+        id uuid,
+        name text,
+        description text)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        id,
+        name,
+        description
+    FROM
+        keyhippo_rbac.groups
+    WHERE
+        id = p_group_id;
+$$;
+
+-- Update
+CREATE OR REPLACE FUNCTION keyhippo_rbac.update_group (p_group_id uuid, p_name text, p_description text)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        keyhippo_rbac.groups
+    SET
+        name = p_name,
+        description = p_description
+    WHERE
+        id = p_group_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Delete
+CREATE OR REPLACE FUNCTION keyhippo_rbac.delete_group (p_group_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM keyhippo_rbac.groups
+    WHERE id = p_group_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- User Group Roles CRUD
+-- Create (already exists as assign_role_to_user)
+-- Read
+CREATE OR REPLACE FUNCTION keyhippo_rbac.get_user_group_roles (p_user_id uuid)
+    RETURNS TABLE (
+        user_id uuid,
+        group_id uuid,
+        role_id uuid)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        user_id,
+        group_id,
+        role_id
+    FROM
+        keyhippo_rbac.user_group_roles
+    WHERE
+        user_id = p_user_id;
+$$;
+
+-- Update (Not typically needed as you would usually just delete and re-assign)
+-- Delete
+CREATE OR REPLACE FUNCTION keyhippo_rbac.remove_user_group_role (p_user_id uuid, p_group_id uuid, p_role_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM keyhippo_rbac.user_group_roles
+    WHERE user_id = p_user_id
+        AND group_id = p_group_id
+        AND role_id = p_role_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- ABAC Policies CRUD
+-- Create (already exists as create_policy)
+-- Read
+CREATE OR REPLACE FUNCTION keyhippo_abac.get_policy (p_policy_id uuid)
+    RETURNS TABLE (
+        id uuid,
+        name text,
+        description text,
+        POLICY jsonb)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        id,
+        name,
+        description,
+        POLICY
+    FROM
+        keyhippo_abac.policies
+    WHERE
+        id = p_policy_id;
+$$;
+
+-- Update
+CREATE OR REPLACE FUNCTION keyhippo_abac.update_policy (p_policy_id uuid, p_name text, p_description text, p_policy jsonb)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        keyhippo_abac.policies
+    SET
+        name = p_name,
+        description = p_description,
+        POLICY = p_policy
+    WHERE
+        id = p_policy_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Delete
+CREATE OR REPLACE FUNCTION keyhippo_abac.delete_policy (p_policy_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM keyhippo_abac.policies
+    WHERE id = p_policy_id;
+    RETURN FOUND;
+END;
+$$;
