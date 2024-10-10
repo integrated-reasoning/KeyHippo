@@ -725,6 +725,39 @@ export class KeyHippo {
     }
   }
 
+  /**
+   * Creates a new role in the RBAC system.
+   *
+   * @param roleName - The name of the role to be created.
+   * @param groupId - The unique identifier of the group to which the role will be associated.
+   * @param description - An optional description of the role's purpose or scope.
+   * @returns A Promise resolving to the RoleId of the newly created role.
+   *
+   * Role creation process:
+   * 1. Calls the 'create_role' function with the provided roleName, groupId, and description.
+   * 2. Validates the input parameters and checks for existing roles with the same name in the group.
+   * 3. Creates a new entry in the roles table within the RBAC schema.
+   * 4. Logs the creation of the new role for auditing purposes.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const newRoleId = await keyHippo.createRole('Editor', 'group123', 'Can edit and publish content');
+   *   console.log(`New role created with ID: ${newRoleId}`);
+   * } catch (error) {
+   *   console.error('Failed to create role:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can create new roles.
+   * - Creating roles affects the overall permission structure of the application.
+   *
+   * Error handling:
+   * - Throws an error if the role creation fails due to validation issues or conflicts.
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the group does not exist.
+   */
   async createRole(
     roleName: string,
     groupId: GroupId,
