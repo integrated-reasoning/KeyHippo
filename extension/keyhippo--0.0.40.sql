@@ -141,6 +141,8 @@ CREATE INDEX IF NOT EXISTS idx_roles_name ON keyhippo_rbac.roles (name);
 CREATE OR REPLACE FUNCTION keyhippo_rbac.create_permission (p_name text, p_description text)
     RETURNS uuid
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     v_permission_id uuid;
@@ -160,6 +162,8 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.get_permission (p_permission_id uuid)
         name text,
         description text)
     LANGUAGE sql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
     SELECT
         id,
@@ -175,6 +179,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.update_permission (p_permission_id uuid, p_name text, p_description text)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     UPDATE
@@ -192,6 +198,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.delete_permission (p_permission_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     DELETE FROM keyhippo_rbac.permissions
@@ -205,6 +213,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.create_role (p_name text, p_description text, p_group_id uuid)
     RETURNS uuid
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     v_role_id uuid;
@@ -225,6 +235,8 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.get_role (p_role_id uuid)
         description text,
         group_id uuid)
     LANGUAGE sql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
     SELECT
         id,
@@ -241,6 +253,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.update_role (p_role_id uuid, p_name text, p_description text)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     UPDATE
@@ -258,6 +272,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.delete_role (p_role_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     DELETE FROM keyhippo_rbac.roles
@@ -271,6 +287,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.create_group (p_name text, p_description text)
     RETURNS uuid
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     v_group_id uuid;
@@ -290,6 +308,8 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.get_group (p_group_id uuid)
         name text,
         description text)
     LANGUAGE sql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
     SELECT
         id,
@@ -305,6 +325,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.update_group (p_group_id uuid, p_name text, p_description text)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     UPDATE
@@ -322,6 +344,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.delete_group (p_group_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     DELETE FROM keyhippo_rbac.groups
@@ -338,6 +362,8 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.get_user_group_roles (p_user_id uuid)
         group_id uuid,
         role_id uuid)
     LANGUAGE sql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
     SELECT
         user_id,
@@ -353,6 +379,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_rbac.remove_user_group_role (p_user_id uuid, p_group_id uuid, p_role_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     DELETE FROM keyhippo_rbac.user_group_roles
@@ -372,6 +400,8 @@ CREATE OR REPLACE FUNCTION keyhippo_abac.get_policy (p_policy_id uuid)
         description text,
         POLICY jsonb)
     LANGUAGE sql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
     SELECT
         id,
@@ -388,6 +418,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_abac.update_policy (p_policy_id uuid, p_name text, p_description text, p_policy jsonb)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     UPDATE
@@ -406,6 +438,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo_abac.delete_policy (p_policy_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     DELETE FROM keyhippo_abac.policies
@@ -419,6 +453,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo.create_scope (p_name text, p_description text)
     RETURNS uuid
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     v_scope_id uuid;
@@ -438,6 +474,8 @@ CREATE OR REPLACE FUNCTION keyhippo.get_scope (p_scope_id uuid)
         name text,
         description text)
     LANGUAGE sql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
     SELECT
         id,
@@ -453,6 +491,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo.update_scope (p_scope_id uuid, p_name text, p_description text)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     UPDATE
@@ -470,6 +510,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo.delete_scope (p_scope_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     DELETE FROM keyhippo.scopes
@@ -482,6 +524,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo.add_permission_to_scope (p_scope_id uuid, p_permission_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     INSERT INTO keyhippo.scope_permissions (scope_id, permission_id)
@@ -496,6 +540,8 @@ $$;
 CREATE OR REPLACE FUNCTION keyhippo.remove_permission_from_scope (p_scope_id uuid, p_permission_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     DELETE FROM keyhippo.scope_permissions
@@ -511,6 +557,8 @@ CREATE OR REPLACE FUNCTION keyhippo.get_scope_permissions (p_scope_id uuid)
         permission_id uuid,
         permission_name text)
     LANGUAGE sql
+    SECURITY INVOKER
+    SET search_path = pg_temp
     AS $$
     SELECT
         p.id,
@@ -1016,6 +1064,8 @@ $$;
 
 CREATE OR REPLACE FUNCTION keyhippo_rbac.user_has_permission (permission_name text)
     RETURNS boolean
+    LANGUAGE plpgsql
+    SECURITY DEFINER
     AS $$
 DECLARE
     current_user_id uuid;
@@ -1035,9 +1085,7 @@ BEGIN
             ugr.user_id = current_user_id
             AND p.name = permission_name);
 END;
-$$
-LANGUAGE plpgsql
-SECURITY DEFINER;
+$$;
 
 CREATE OR REPLACE FUNCTION keyhippo_rbac.add_user_to_group (p_user_id uuid, p_group_id uuid, p_role_name text)
     RETURNS void
