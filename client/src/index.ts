@@ -824,6 +824,43 @@ export class KeyHippo {
     }
   }
 
+  /**
+   * Sets an attribute for a specific group in the ABAC system.
+   *
+   * @param groupId - The unique identifier of the group whose attribute is being set.
+   * @param attribute - The name of the attribute to set for the group.
+   * @param value - The value to assign to the attribute.
+   * @returns A Promise resolving to void when the attribute has been successfully set.
+   *
+   * This method performs the following steps:
+   * 1. Calls the 'set_group_attribute' function with the provided groupId, attribute, and value.
+   * 2. If the attribute doesn't exist for the group, it creates a new entry.
+   * 3. If the attribute already exists, it updates the existing value.
+   * 4. Stores or updates the attribute in the group_attributes table in the ABAC schema.
+   * 5. Logs the operation for auditing purposes.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   await keyHippo.setGroupAttribute('group123', 'max_members', 100);
+   *   console.log('Group attribute set successfully');
+   * } catch (error) {
+   *   console.error('Error setting group attribute:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized users can modify group attributes.
+   * - Group attributes can affect access control decisions, so they should be carefully managed.
+   *
+   * Error handling:
+   * - Throws an error if the attribute cannot be set due to database constraints.
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the group does not exist.
+   *
+   * Note: This method sets a single attribute. For setting multiple attributes at once,
+   * consider implementing a batch update method.
+   */
   async setGroupAttribute(
     groupId: GroupId,
     attribute: string,
