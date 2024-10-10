@@ -285,6 +285,12 @@ export class KeyHippo {
    * Note: This method will fail if the user is not authenticated or if they don't own the API key being rotated.
    */
   async rotateApiKey(apiKeyId: ApiKeyId): Promise<RotateApiKeyResult> {
+    const hasPermission = await this.userHasPermission("rotate_api_key");
+    if (!hasPermission) {
+      throw new Error(
+        "Unauthorized: User does not have permission to rotate API keys",
+      );
+    }
     try {
       return await rotateApiKey(this.supabase, apiKeyId, this.logger);
     } catch (error) {
