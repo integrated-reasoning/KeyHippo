@@ -331,26 +331,82 @@ describe("KeyHippo Client Tests", () => {
       const childRoleId = testSetup.userRoleId;
       const parentRoleId = testSetup.adminRoleId;
 
-      const result = await testSetup.keyHippo.setParentRole(
-        childRoleId,
-        parentRoleId,
-      );
+      try {
+        const result = await testSetup.keyHippo.setParentRole(
+          childRoleId,
+          parentRoleId,
+        );
 
-      expect(result).toBeDefined();
-      expect(result.updated_parent_role_id).toBe(parentRoleId);
+        console.log("setParentRole result:", JSON.stringify(result, null, 2));
 
-      // Verify the role hierarchy directly
-      const roleHierarchy = await testSetup.serviceSupabase
-        .schema("keyhippo_rbac")
-        .from("roles")
-        .select("parent_role_id")
-        .eq("id", childRoleId)
-        .single();
+        expect(result).toBeDefined();
+        expect(result).toHaveProperty("parent_role_id");
+        expect(result.parent_role_id).toBe(parentRoleId);
 
-      expect(roleHierarchy.data).toBeDefined();
-      expect(roleHierarchy.data!.parent_role_id).toBe(parentRoleId);
+        // Verify the role hierarchy directly
+        const { data, error } = await testSetup.serviceSupabase
+          .schema("keyhippo_rbac")
+          .from("roles")
+          .select("parent_role_id")
+          .eq("id", childRoleId)
+          .single();
+
+        if (error) {
+          console.error("Error fetching role hierarchy:", error);
+          throw error;
+        }
+
+        console.log("Database query result:", JSON.stringify(data, null, 2));
+
+        expect(data).toBeDefined();
+        expect(data).toHaveProperty("parent_role_id");
+        expect(data.parent_role_id).toBe(parentRoleId);
+
+        // Test removing the parent role
+        const removeResult = await testSetup.keyHippo.setParentRole(
+          childRoleId,
+          null,
+        );
+
+        console.log(
+          "Remove parent role result:",
+          JSON.stringify(removeResult, null, 2),
+        );
+
+        expect(removeResult).toBeDefined();
+        expect(removeResult).toHaveProperty("parent_role_id");
+        expect(removeResult.parent_role_id).toBeNull();
+
+        // Verify the role hierarchy after removal
+        const { data: removedData, error: removedError } =
+          await testSetup.serviceSupabase
+            .schema("keyhippo_rbac")
+            .from("roles")
+            .select("parent_role_id")
+            .eq("id", childRoleId)
+            .single();
+
+        if (removedError) {
+          console.error(
+            "Error fetching role hierarchy after removal:",
+            removedError,
+          );
+          throw removedError;
+        }
+
+        console.log(
+          "Database query result after removal:",
+          JSON.stringify(removedData, null, 2),
+        );
+
+        expect(removedData).toBeDefined();
+        expect(removedData).toHaveProperty("parent_role_id");
+        expect(removedData.parent_role_id).toBeNull();
+      } catch (error) {
+        console.error("Error in setParentRole test:", error);
+        throw error;
+      }
     });
-
     it("should assign a parent role to a child role", async () => {
       const childRoleId = testSetup.userRoleId; // 'User' role
       const parentRoleId = testSetup.adminRoleId; // 'Admin' role

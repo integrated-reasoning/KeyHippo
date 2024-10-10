@@ -439,15 +439,17 @@ export class KeyHippo {
    */
   async setParentRole(
     childRoleId: RoleId,
-    parentRoleId: RoleId|null,
-  ): Promise<{ parent_role_id: RoleId }> {
+    parentRoleId: RoleId | null,
+  ): Promise<{ parent_role_id: RoleId | null }> {
     try {
-      return await setParentRole(
+      const result = await setParentRole(
         this.supabase,
         childRoleId,
         parentRoleId,
         this.logger,
       );
+      this.logger.info(`setParentRole result: ${JSON.stringify(result)}`);
+      return result;
     } catch (error) {
       this.logger.error(
         `Error setting parent role: ${error instanceof Error ? error.message : String(error)}`,

@@ -31,7 +31,7 @@ const executeSetParentRoleRpc = async (
   supabase: SupabaseClient<any, "public", any>,
   childRoleId: RoleId,
   parentRoleId: RoleId | null,
-): Promise<{ parent_role_id: RoleId }> => {
+): Promise<{ parent_role_id: RoleId | null }> => {
   const { data, error } = await supabase
     .schema("keyhippo_rbac")
     .rpc("set_parent_role", {
@@ -41,7 +41,9 @@ const executeSetParentRoleRpc = async (
 
   if (error) throw new Error(`Failed to set parent role: ${error.message}`);
   if (!data) throw new Error("Invalid data returned from set_parent_role RPC");
-  return { parent_role_id: data.updated_parent_role_id };
+
+  // Return the parentRoleId if it was set, or null if it was removed
+  return { parent_role_id: parentRoleId };
 };
 
 /**
@@ -101,7 +103,7 @@ export const setParentRole = async (
   childRoleId: RoleId,
   parentRoleId: RoleId | null,
   logger: Logger,
-): Promise<{ parent_role_id: RoleId }> => {
+): Promise<{ parent_role_id: RoleId | null }> => {
   try {
     logSetParentRoleAttempt(logger, childRoleId, parentRoleId);
     const result = await executeSetParentRoleRpc(
@@ -109,7 +111,7 @@ export const setParentRole = async (
       childRoleId,
       parentRoleId,
     );
-    logSetParentRoleSuccess(logger, childRoleId, parentRoleId);
+    logSetParentRoleSuccess(logger, childRoleId, result.parent_role_id);
     return result;
   } catch (error) {
     return handleSetParentRoleError(error, logger, childRoleId, parentRoleId);
