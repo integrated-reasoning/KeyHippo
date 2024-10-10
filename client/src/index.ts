@@ -10,6 +10,7 @@ import {
   assignPermissionToRole,
   addUserToGroup,
   createRole,
+  createPermission,
   getParentRole,
   setParentRole,
   getRolePermissions,
@@ -933,4 +934,54 @@ export class KeyHippo {
       throw error;
     }
   }
+
+  /**
+   * Creates a new permission in the RBAC system.
+   *
+   * @param permissionName - The name of the permission to create.
+   * @param description - An optional description of the permission.
+   * @returns A Promise resolving to the ID of the newly created permission.
+   *
+   * This method involves the following steps:
+   * 1. Calls the 'create_permission' RPC function with the provided permissionName and description.
+   * 2. Creates a new permission entry in the RBAC schema.
+   * 3. Returns the ID of the newly created permission.
+   *
+   * Security implications:
+   * - This method should be used carefully, typically by administrators or during system setup.
+   * - Creating new permissions can impact the overall access control structure of the application.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const newPermissionId = await keyHippo.createPermission('edit_user_profile', 'Allows editing of user profiles');
+   *   console.log('New permission created with ID:', newPermissionId);
+   * } catch (error) {
+   *   console.error('Failed to create permission:', error);
+   * }
+   * ```
+   *
+   * Error handling:
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the permission creation fails for any reason (e.g., duplicate permission name).
+   */
+  async createPermission(
+    permissionName: string,
+    description: string = "",
+  ): Promise<PermissionId> {
+    try {
+      return await createPermission(
+        this.supabase,
+        permissionName,
+        description,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error creating permission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
 }

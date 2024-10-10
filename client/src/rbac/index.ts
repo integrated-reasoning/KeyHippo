@@ -1,4 +1,6 @@
 export * from "./addUserToGroup";
+export * from "./assignPermissionToRole";
+export * from "./createPermission";
 export * from "./createRole";
 export * from "./getParentRole";
 export * from "./getRolePermissions";
