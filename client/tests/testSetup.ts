@@ -186,6 +186,14 @@ export async function setupTest(): Promise<TestSetup> {
     throw new Error("Required roles (Admin and User) not found");
   }
 
+  // 13. Grant 'manage_roles' permission to the user
+  await grantManageRolesPermission(
+    serviceSupabase,
+    userId,
+    adminRole.id,
+    adminGroup.id,
+  );
+
   return {
     keyHippo,
     userId,
@@ -196,4 +204,97 @@ export async function setupTest(): Promise<TestSetup> {
     adminRoleId: adminRole.id,
     userRoleId: userRole.id,
   };
+}
+
+async function grantManageRolesPermission(
+  serviceSupabase: SupabaseClient,
+  userId: string,
+  adminRoleId: string,
+  adminGroupId: string,
+) {
+  // First, ensure the 'manage_roles' permission exists
+  let { data: permission, error: permissionError } = await serviceSupabase
+    .schema("keyhippo_rbac")
+    .from("permissions")
+    .select("id")
+    .eq("name", "manage_roles")
+    .single();
+
+  if (permissionError) {
+    if (permissionError.code === "PGRST116") {
+      // Permission doesn't exist, create it
+      const { data: newPermission, error: createPermissionError } =
+        await serviceSupabase
+          .schema("keyhippo_rbac")
+          .from("permissions")
+          .insert({
+            name: "manage_roles",
+            description: "Permission to manage roles",
+          })
+          .select("id")
+          .single();
+
+      if (createPermissionError) {
+        console.error(
+          "Failed to create 'manage_roles' permission:",
+          createPermissionError,
+        );
+        throw new Error(
+          `Failed to create 'manage_roles' permission: ${createPermissionError.message}`,
+        );
+      }
+
+      permission = newPermission;
+    } else {
+      console.error(
+        "Error fetching 'manage_roles' permission:",
+        permissionError,
+      );
+      throw new Error(
+        `Error fetching 'manage_roles' permission: ${permissionError.message}`,
+      );
+    }
+  }
+
+  // Assign the 'manage_roles' permission to the admin role if not already assigned
+  const { data: existingRolePermission, error: rolePermissionError } =
+    await serviceSupabase
+      .schema("keyhippo_rbac")
+      .from("role_permissions")
+      .select("id")
+      .eq("role_id", adminRoleId)
+      .eq("permission_id", permission!.id)
+      .single();
+
+  if (!existingRolePermission && !rolePermissionError) {
+    await serviceSupabase
+      .schema("keyhippo_rbac")
+      .from("role_permissions")
+      .insert({ role_id: adminRoleId, permission_id: permission!.id })
+      .select();
+  }
+
+  // Assign the admin role to the user if not already assigned
+  const { data: existingUserGroupRole, error: userGroupRoleError } =
+    await serviceSupabase
+      .schema("keyhippo_rbac")
+      .from("user_group_roles")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("group_id", adminGroupId)
+      .eq("role_id", adminRoleId)
+      .single();
+
+  if (!existingUserGroupRole && !userGroupRoleError) {
+    await serviceSupabase
+      .schema("keyhippo_rbac")
+      .from("user_group_roles")
+      .insert({ user_id: userId, group_id: adminGroupId, role_id: adminRoleId })
+      .select();
+  }
+
+  // Update the claims cache
+  await serviceSupabase
+    .schema("keyhippo_rbac")
+    .rpc("update_user_claims_cache", { p_user_id: userId });
 }
