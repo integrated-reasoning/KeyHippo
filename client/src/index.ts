@@ -20,6 +20,7 @@ import {
 import {
   createPolicy,
   deletePolicy,
+  updatePolicy,
   evaluatePolicies,
   getUserAttribute,
   setUserAttribute,
@@ -1023,6 +1024,63 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error creating permission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Updates an existing ABAC policy in the system.
+   *
+   * @param policyId - The unique identifier of the policy to be updated.
+   * @param name - The new name for the policy.
+   * @param description - The new description for the policy.
+   * @param policy - The new policy JSON object.
+   * @returns A Promise resolving to a boolean indicating whether the update was successful.
+   *
+   * Policy update process:
+   * 1. Validates the input parameters.
+   * 2. Updates the policy entry in the policies table within the ABAC schema.
+   * 3. Returns true if the policy was found and updated, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const policyJson = { condition: "user.age >= 18", effect: "allow" };
+   *   const updateSuccess = await keyHippo.updatePolicy('policy123', 'Adult Content', 'Allows access to adult content', policyJson);
+   *   console.log(`Policy update ${updateSuccess ? 'successful' : 'failed'}`);
+   * } catch (error) {
+   *   console.error('Failed to update policy:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can update policies.
+   * - Updating policies affects the overall access control structure of the application.
+   *
+   * Error handling:
+   * - Throws an error if the policy update fails due to validation issues or conflicts.
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the policy does not exist.
+   */
+  async updatePolicy(
+    policyId: PolicyId,
+    name: string,
+    description: string,
+    policy: object,
+  ): Promise<boolean> {
+    try {
+      return await updatePolicy(
+        this.supabase,
+        policyId,
+        name,
+        description,
+        policy,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error updating policy: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
