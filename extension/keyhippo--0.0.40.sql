@@ -1087,6 +1087,51 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION keyhippo_rbac.assign_permission_to_role (p_role_id uuid, p_permission_name text)
+    RETURNS void
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_temp
+    AS $$
+DECLARE
+    v_permission_id uuid;
+    v_current_user_id uuid;
+BEGIN
+    -- Get the current user context
+    SELECT
+        user_id INTO v_current_user_id
+    FROM
+        keyhippo.current_user_context ();
+    -- Check if the current user has 'manage_roles' permission
+    IF NOT keyhippo_rbac.user_has_permission ('manage_roles') THEN
+        RAISE EXCEPTION 'Unauthorized to assign permissions to roles';
+    END IF;
+    -- Get the permission ID
+    SELECT
+        id INTO v_permission_id
+    FROM
+        keyhippo_rbac.permissions
+    WHERE
+        name = p_permission_name;
+    IF v_permission_id IS NULL THEN
+        RAISE EXCEPTION 'Permission % not found', p_permission_name;
+    END IF;
+    -- Insert the role-permission relationship
+    INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
+        VALUES (p_role_id, v_permission_id)
+    ON CONFLICT (role_id, permission_id)
+        DO NOTHING;
+    -- Update the claims cache for all users with this role
+    -- This is a simplified approach; you might want to optimize this for large user bases
+    PERFORM
+        keyhippo_rbac.update_user_claims_cache (user_id)
+    FROM
+        keyhippo_rbac.user_group_roles
+    WHERE
+        role_id = p_role_id;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION keyhippo_rbac.add_user_to_group (p_user_id uuid, p_group_id uuid, p_role_name text)
     RETURNS void
     LANGUAGE plpgsql
@@ -1453,6 +1498,8 @@ GRANT EXECUTE ON FUNCTION keyhippo_rbac.set_parent_role (uuid, uuid) TO authenti
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.update_user_claims_cache (uuid) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.user_has_permission (text) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_permission_to_role (uuid, text) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo_abac.set_user_attribute (uuid, text, jsonb) TO authenticated;
 
