@@ -1248,6 +1248,11 @@ INSERT INTO keyhippo_rbac.permissions (name, description)
 ON CONFLICT (name)
     DO NOTHING;
 
+INSERT INTO keyhippo_rbac.permissions (name, description)
+    VALUES ('rotate_api_key', 'Permission to rotate API keys')
+ON CONFLICT (name)
+    DO NOTHING;
+
 -- Assign manage_user_attributes permission to supabase_auth_admin role
 INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
 SELECT
