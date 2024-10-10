@@ -42,6 +42,42 @@ import {
   RoleId,
 } from "./types";
 
+/* TODO: Add:
+1. ABAC (Attribute-Based Access Control):
+   - evaluatePolicies
+   - getGroupAttribute
+
+2. API Keys:
+   - No missing functions
+
+3. RBAC (Role-Based Access Control):
+   - createRole
+   - getParentRole
+   - getRolePermissions
+   - removeUserFromGroup
+   - removePermissionFromRole
+
+4. Utils:
+   - No missing functions
+
+5. Root level:
+   - createGroup
+   - updateGroup
+   - deleteGroup
+   - getGroup
+   - createPermission
+   - updatePermission
+   - deletePermission
+   - getPermission
+   - createScope
+   - updateScope
+   - deleteScope
+   - getScope
+   - addPermissionToScope
+   - removePermissionFromScope
+   - getScopePermissions
+*/
+
 /**
  * KeyHippo: API Key Management and Access Control System
  *
