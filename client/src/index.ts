@@ -7,6 +7,7 @@ import {
   rotateApiKey,
 } from "./api-keys";
 import {
+  assignPermissionToRole,
   addUserToGroup,
   createRole,
   getParentRole,
@@ -29,6 +30,8 @@ import {
   ApiKeyEntity,
   ApiKeySummary,
   ApiKeyMetadata,
+  PermissionId,
+  PermissionName,
   AuthResult,
   UserId,
   ApiKeyId,
