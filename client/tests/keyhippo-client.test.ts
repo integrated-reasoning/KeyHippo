@@ -313,7 +313,7 @@ describe("KeyHippo Client Tests", () => {
       // Query claims cache directly to verify
       const claimsCacheResult = await testSetup.serviceSupabase
         .schema("keyhippo_rbac")
-        .from(".claims_cache")
+        .from("claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -331,11 +331,18 @@ describe("KeyHippo Client Tests", () => {
       const childRoleId = testSetup.userRoleId;
       const parentRoleId = testSetup.adminRoleId;
 
-      await testSetup.keyHippo.setParentRole(childRoleId, parentRoleId);
+      const result = await testSetup.keyHippo.setParentRole(
+        childRoleId,
+        parentRoleId,
+      );
 
-      // Instead of checking the returned data, verify the role hierarchy directly
+      expect(result).toBeDefined();
+      expect(result.updated_parent_role_id).toBe(parentRoleId);
+
+      // Verify the role hierarchy directly
       const roleHierarchy = await testSetup.serviceSupabase
-        .from("keyhippo_rbac.roles")
+        .schema("keyhippo_rbac")
+        .from("roles")
         .select("parent_role_id")
         .eq("id", childRoleId)
         .single();
@@ -353,7 +360,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify the parent role assignment
       const parentRoleResult = await testSetup.serviceSupabase
-        .from("keyhippo_rbac.roles")
+        .schema("keyhippo_rbac")
+        .from("roles")
         .select("parent_role_id")
         .eq("id", childRoleId)
         .single();
@@ -422,7 +430,8 @@ describe("KeyHippo Client Tests", () => {
       }
 
       const claimsCacheResult = await testSetup.serviceSupabase
-        .from("keyhippo_rbac.claims_cache")
+        .schema("keyhippo_rbac")
+        .from("claims_cahche")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -448,7 +457,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify the policy creation in the database
       const createdPolicy = await testSetup.serviceSupabase
-        .from("keyhippo_abac.policies")
+        .schema("keyhippo_abac")
+        .from("policies")
         .select("*")
         .eq("name", policyName)
         .single();
@@ -471,7 +481,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify the policy was created
       const createdPolicy = await testSetup.serviceSupabase
-        .from("keyhippo_abac.policies")
+        .schema("keyhippo_abac")
+        .from("policies")
         .select("description, policy")
         .eq("name", "Test Policy")
         .single();
@@ -594,7 +605,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify that only one policy exists
       const policies = await testSetup.serviceSupabase
-        .from("keyhippo_abac.policies")
+        .schema("keyhippo_abac")
+        .from("policies")
         .select("*")
         .eq("name", policyName);
 
@@ -740,7 +752,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Query claims cache directly to verify
       const claimsCache = await testSetup.serviceSupabase
-        .from("keyhippo_rbac.claims_cache")
+        .schema("keyhippo_rbac")
+        .from("claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -901,7 +914,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Check that the claims cache reflects the new role
       const claimsCache = await testSetup.serviceSupabase
-        .from("keyhippo_rbac.claims_cache")
+        .schema("keyhippo_rbac")
+        .from("claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -982,7 +996,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify both roles are revoked
       const claimsCache = await testSetup.serviceSupabase
-        .from("keyhippo_rbac.claims_cache")
+        .schema("keyhippo_rbac")
+        .from("claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -999,7 +1014,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Verify the child role inherits the permissions of the parent role
       const claimsCache = await testSetup.serviceSupabase
-        .from("keyhippo_rbac.claims_cache")
+        .schema("keyhippo_rbac")
+        .from("claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
@@ -1024,7 +1040,8 @@ describe("KeyHippo Client Tests", () => {
 
       // Check that the claims cache no longer contains the Admin role
       const claimsCache = await testSetup.serviceSupabase
-        .from("keyhippo_rbac.claims_cache")
+        .schema("keyhippo_rbac")
+        .from("claims_cache")
         .select("rbac_claims")
         .eq("user_id", testSetup.userId)
         .single();
