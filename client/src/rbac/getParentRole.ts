@@ -1,9 +1,5 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import {
-  Logger,
-  RoleId,
-  ParentRoleId,
-} from "../types";
+import { Logger, RoleId } from "../types";
 import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
 
 /**
@@ -25,12 +21,12 @@ const logGetParentRoleAttempt = (logger: Logger, roleId: RoleId): void => {
 const executeGetParentRoleRpc = async (
   supabase: SupabaseClient<any, "public", any>,
   roleId: RoleId,
-): Promise<{ parent_role_id: ParentRoleId }> => {
+): Promise<{ parent_role_id: RoleId }> => {
   const { data, error } = await supabase
     .from("keyhippo_rbac.roles")
     .select("parent_role_id")
     .eq("id", roleId)
-    .single<{ parent_role_id: ParentRoleId }>();
+    .single<{ parent_role_id: RoleId }>();
 
   if (error) {
     throw new Error(`Get Parent Role RPC failed: ${error.message}`);
@@ -52,7 +48,7 @@ const executeGetParentRoleRpc = async (
 const logGetParentRoleSuccess = (
   logger: Logger,
   roleId: RoleId,
-  parentRoleId: ParentRoleId,
+  parentRoleId: RoleId,
 ): void => {
   if (parentRoleId) {
     logInfo(
@@ -60,10 +56,7 @@ const logGetParentRoleSuccess = (
       `Successfully retrieved parent role for Role ID: ${roleId}. Parent Role ID: ${parentRoleId}`,
     );
   } else {
-    logInfo(
-      logger,
-      `No parent role found for Role ID: ${roleId}`,
-    );
+    logInfo(logger, `No parent role found for Role ID: ${roleId}`);
   }
 };
 
@@ -97,7 +90,7 @@ export const getParentRole = async (
   supabase: SupabaseClient<any, "public", any>,
   roleId: RoleId,
   logger: Logger,
-): Promise<ParentRoleId> => {
+): Promise<RoleId> => {
   try {
     logGetParentRoleAttempt(logger, roleId);
     const result = await executeGetParentRoleRpc(supabase, roleId);

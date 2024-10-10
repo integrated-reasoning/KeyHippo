@@ -454,6 +454,53 @@ export class KeyHippo {
   }
 
   /**
+   * Retrieves the parent role of a specified role in the RBAC system.
+   *
+   * @param roleId - The unique identifier of the role whose parent is being retrieved.
+   * @returns A Promise resolving to the parent role ID or null if no parent role exists.
+   *
+   * Parent role retrieval process:
+   * 1. Validates the input parameter.
+   * 2. Queries the roles table within the RBAC schema for the specified role.
+   * 3. Returns the parent_role_id if found, or null if the role has no parent.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const parentRoleId = await keyHippo.getParentRole('role123');
+   *   if (parentRoleId) {
+   *     console.log(`Parent role ID: ${parentRoleId}`);
+   *   } else {
+   *     console.log('This role has no parent role.');
+   *   }
+   * } catch (error) {
+   *   console.error('Failed to retrieve parent role:', error);
+   * }
+   * ```
+
+   *
+   * Security implications:
+   * - Ensure that only authorized users or systems can retrieve role hierarchies.
+   * - Be cautious about exposing the full role hierarchy to prevent potential misuse.
+   *
+   * Error handling:
+   * - Throws an error if the role retrieval fails due to database issues.
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the specified role does not exist.
+   * - Returns null if the role exists but has no parent (does not throw an error).
+   */
+  async getParentRole(roleId: RoleId): Promise<RoleId | null> {
+    try {
+      return await getParentRole(this.supabase, roleId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving parent role: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Sets a parent role for a specified child role.
    *
    * @param childRoleId - The unique identifier of the child role.
