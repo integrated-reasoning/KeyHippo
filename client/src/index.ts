@@ -1228,4 +1228,52 @@ export class KeyHippo {
       throw error;
     }
   }
+
+  /**
+   * Retrieves an attribute for a specified group in the ABAC system.
+   *
+   * @param groupId - The unique identifier of the group.
+   * @param attribute - The name of the attribute to retrieve.
+   * @returns A Promise resolving to the value of the attribute or null if not set.
+   *
+   * Group attribute retrieval process:
+   * 1. Validates the input parameters.
+   * 2. Queries the group_attributes table within the ABAC schema for the specified group and attribute.
+   * 3. Returns the value of the attribute if found, or null if not set.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const maxMembers = await keyHippo.getGroupAttribute('group123', 'max_members');
+   *   console.log(`Maximum members for the group: ${maxMembers}`);
+   * } catch (error) {
+   *   console.error('Failed to retrieve group attribute:', error);
+   * }
+   * ```
+
+   *
+   * Security implications:
+   * - Ensure that only authorized users or systems can retrieve group attributes.
+   * - Be cautious about exposing sensitive group information through attributes.
+   *
+   * Error handling:
+   * - Throws an error if the attribute retrieval fails due to database issues.
+   * - Throws an error if there are database connectivity issues.
+   * - Returns null if the attribute is not set for the group (but does not throw an error).
+   */
+  async getGroupAttribute(groupId: GroupId, attribute: string): Promise<any> {
+    try {
+      return await getGroupAttribute(
+        this.supabase,
+        groupId,
+        attribute,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving group attribute: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
 }
