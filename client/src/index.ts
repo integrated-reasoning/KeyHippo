@@ -437,7 +437,6 @@ export class KeyHippo {
    * - Throws an error if setting the parent role would create a circular dependency.
    * - Throws an error if there are database connectivity issues.
    */
-  /* // TODO
   async setParentRole(
     childRoleId: RoleId,
     parentRoleId: RoleId|null,
@@ -456,7 +455,6 @@ export class KeyHippo {
       throw error;
     }
   }
-  */
 
   /**
    * Updates the claims cache for a specified user, ensuring their role-based claims are up-to-date.

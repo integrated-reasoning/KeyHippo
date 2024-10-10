@@ -11,7 +11,7 @@ import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
 const logSetParentRoleAttempt = (
   logger: Logger,
   childRoleId: RoleId,
-  parentRoleId: RoleId|null,
+  parentRoleId: RoleId | null,
 ): void => {
   logDebug(
     logger,
@@ -30,25 +30,18 @@ const logSetParentRoleAttempt = (
 const executeSetParentRoleRpc = async (
   supabase: SupabaseClient<any, "public", any>,
   childRoleId: RoleId,
-  parentRoleId: RoleId|null,
+  parentRoleId: RoleId | null,
 ): Promise<{ parent_role_id: RoleId }> => {
   const { data, error } = await supabase
     .schema("keyhippo_rbac")
     .rpc("set_parent_role", {
-      child_role_id: childRoleId,
-      parent_role_id: parentRoleId,
-    })
-    .single<{ parent_role_id: RoleId }>();
+      p_child_role_id: childRoleId,
+      p_new_parent_role_id: parentRoleId,
+    });
 
-  if (error) {
-    throw new Error(`Set Parent Role RPC failed: ${error.message}`);
-  }
-
-  if (!data) {
-    throw new Error("Invalid data returned from set_parent_role RPC");
-  }
-
-  return { parent_role_id: data.parent_role_id };
+  if (error) throw new Error(`Failed to set parent role: ${error.message}`);
+  if (!data) throw new Error("Invalid data returned from set_parent_role RPC");
+  return { parent_role_id: data.updated_parent_role_id };
 };
 
 /**
@@ -60,7 +53,7 @@ const executeSetParentRoleRpc = async (
 const logSetParentRoleSuccess = (
   logger: Logger,
   childRoleId: RoleId,
-  parentRoleId: RoleId|null,
+  parentRoleId: RoleId | null,
 ): void => {
   if (parentRoleId) {
     logInfo(
@@ -85,7 +78,7 @@ const handleSetParentRoleError = (
   error: unknown,
   logger: Logger,
   childRoleId: RoleId,
-  parentRoleId: RoleId|null,
+  parentRoleId: RoleId | null,
 ): never => {
   logError(
     logger,
@@ -106,7 +99,7 @@ const handleSetParentRoleError = (
 export const setParentRole = async (
   supabase: SupabaseClient<any, "public", any>,
   childRoleId: RoleId,
-  parentRoleId: RoleId|null,
+  parentRoleId: RoleId | null,
   logger: Logger,
 ): Promise<{ parent_role_id: RoleId }> => {
   try {
