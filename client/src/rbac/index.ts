@@ -1,4 +1,5 @@
 export * from "./addUserToGroup";
+export * from "./removeUserFromGroup";
 export * from "./assignPermissionToRole";
 export * from "./createPermission";
 export * from "./createRole";

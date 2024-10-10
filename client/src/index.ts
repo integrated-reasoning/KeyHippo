@@ -9,6 +9,7 @@ import {
 import {
   assignPermissionToRole,
   addUserToGroup,
+  removeUserFromGroup,
   createRole,
   createPermission,
   getParentRole,
@@ -501,6 +502,51 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error adding user to group: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Removes a user from a group in the RBAC system.
+   *
+   * @param userId - The unique identifier of the user to be removed from the group.
+   * @param groupId - The unique identifier of the group from which the user is being removed.
+   * @returns A Promise that resolves when the removal is successful.
+   *
+   * User removal process:
+   * 1. Validates the input parameters.
+   * 2. Checks if the user is a member of the specified group.
+   * 3. Removes the user-group association from the user_groups table within the RBAC schema.
+   * 4. Handles potential cascading effects (e.g., removing associated roles or permissions).
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   await keyHippo.removeUserFromGroup('user123', 'group456');
+   *   console.log('User successfully removed from group');
+   * } catch (error) {
+   *   console.error('Failed to remove user from group:', error);
+   * }
+   * ```
+
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can remove users from groups.
+   * - Removing a user from a group affects their access rights within the application.
+   * - Consider implementing an audit log for user-group removals.
+   *
+   * Error handling:
+   * - Throws an error if the user or group does not exist.
+   * - Throws an error if the user is not a member of the specified group.
+   * - Throws an error if there are database connectivity issues.
+   */
+  async removeUserFromGroup(userId: UserId, groupId: GroupId): Promise<void> {
+    try {
+      await removeUserFromGroup(this.supabase, userId, groupId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error removing user from group: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }

@@ -1163,6 +1163,27 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION keyhippo_rbac.remove_user_from_group (p_user_id uuid, p_group_id uuid)
+    RETURNS void
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_temp
+    AS $$
+BEGIN
+    -- Remove the user from the user_group_roles table for the specified group
+    DELETE FROM keyhippo_rbac.user_group_roles
+    WHERE user_id = p_user_id
+        AND group_id = p_group_id;
+    -- Check if any rows were affected
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'User % is not a member of Group %', p_user_id, p_group_id;
+    END IF;
+    -- Update the claims cache
+    PERFORM
+        keyhippo_rbac.update_user_claims_cache (p_user_id);
+END;
+$$;
+
 -- ABAC Functions
 CREATE OR REPLACE FUNCTION keyhippo_abac.set_user_attribute (p_user_id uuid, p_attribute text, p_value jsonb)
     RETURNS void
