@@ -86,7 +86,7 @@ export class KeyHippo {
   ) {}
 
   /**
-   * Creates a new API key for the autnticated user.
+   * Creates a new API key for the authenticated user.
    *
    * @param keyDescription - A human-readable description of the key's purpose
    *                         or context.
@@ -412,7 +412,7 @@ export class KeyHippo {
    * Sets a parent role for a specified child role.
    *
    * @param childRoleId - The unique identifier of the child role.
-   * @param parentRoleId - The unique identifier of the parent role.
+   * @param parentRoleId - The unique identifier of the parent role, or null to remove the parent role.
    * @returns A Promise resolving to an object containing the new parent_role_id, or null if cleared.
    *
    * This operation establishes or modifies a hierarchical relationship between roles:
@@ -670,6 +670,7 @@ export class KeyHippo {
       throw error;
     }
   }
+
   /**
    * Sets a user attribute in the ABAC system.
    *
@@ -708,7 +709,6 @@ export class KeyHippo {
    * Note: This method sets a single attribute. For setting multiple attributes at once,
    * consider implementing a batch update method.
    */
-
   async setUserAttribute(
     userId: UserId,
     attribute: string,
