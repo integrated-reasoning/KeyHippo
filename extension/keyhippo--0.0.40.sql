@@ -1549,3 +1549,116 @@ BEGIN
     RETURN FOUND;
 END;
 $$;
+
+-- Scopes CRUD
+-- Create
+CREATE OR REPLACE FUNCTION keyhippo.create_scope (p_name text, p_description text)
+    RETURNS uuid
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    v_scope_id uuid;
+BEGIN
+    INSERT INTO keyhippo.scopes (name, description)
+        VALUES (p_name, p_description)
+    RETURNING
+        id INTO v_scope_id;
+    RETURN v_scope_id;
+END;
+$$;
+
+-- Read
+CREATE OR REPLACE FUNCTION keyhippo.get_scope (p_scope_id uuid)
+    RETURNS TABLE (
+        id uuid,
+        name text,
+        description text)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        id,
+        name,
+        description
+    FROM
+        keyhippo.scopes
+    WHERE
+        id = p_scope_id;
+$$;
+
+-- Update
+CREATE OR REPLACE FUNCTION keyhippo.update_scope (p_scope_id uuid, p_name text, p_description text)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    UPDATE
+        keyhippo.scopes
+    SET
+        name = p_name,
+        description = p_description
+    WHERE
+        id = p_scope_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Delete
+CREATE OR REPLACE FUNCTION keyhippo.delete_scope (p_scope_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM keyhippo.scopes
+    WHERE id = p_scope_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Add permission to scope
+CREATE OR REPLACE FUNCTION keyhippo.add_permission_to_scope (p_scope_id uuid, p_permission_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    INSERT INTO keyhippo.scope_permissions (scope_id, permission_id)
+        VALUES (p_scope_id, p_permission_id)
+    ON CONFLICT (scope_id, permission_id)
+        DO NOTHING;
+    RETURN FOUND;
+END;
+$$;
+
+-- Remove permission from scope
+CREATE OR REPLACE FUNCTION keyhippo.remove_permission_from_scope (p_scope_id uuid, p_permission_id uuid)
+    RETURNS boolean
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    DELETE FROM keyhippo.scope_permissions
+    WHERE scope_id = p_scope_id
+        AND permission_id = p_permission_id;
+    RETURN FOUND;
+END;
+$$;
+
+-- Get permissions for a scope
+CREATE OR REPLACE FUNCTION keyhippo.get_scope_permissions (p_scope_id uuid)
+    RETURNS TABLE (
+        permission_id uuid,
+        permission_name text)
+    LANGUAGE sql
+    AS $$
+    SELECT
+        p.id,
+        p.name
+    FROM
+        keyhippo.scope_permissions sp
+        JOIN keyhippo_rbac.permissions p ON sp.permission_id = p.id
+    WHERE
+        sp.scope_id = p_scope_id;
+$$;
+
+-- TODO:
+-- 1. Update the `keyhippo.create_api_key` function to associate a scope with the API key.
+-- 2. Modify the `keyhippo.verify_api_key` FUNCTION TO RETURN the scope along WITH the user_id AND permissions.
+-- 3. Update any relevant authorization checks to consider the scope of the API key being used.
