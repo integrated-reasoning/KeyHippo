@@ -779,6 +779,40 @@ export class KeyHippo {
     }
   }
 
+  /**
+   * Retrieves the permissions associated with a specific role.
+   *
+   * @param roleId - The unique identifier of the role whose permissions are being queried.
+   * @returns A Promise resolving to an array of permission names associated with the role.
+   *
+   * This method performs the following steps:
+   * 1. Calls the 'get_role_permissions' function with the provided roleId.
+   * 2. Queries the role_permissions table in the RBAC schema.
+   * 3. Retrieves and returns a list of permission names associated with the role.
+   * 4. Logs the operation for auditing purposes.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const permissions = await keyHippo.getRolePermissions('role123');
+   *   console.log('Role permissions:', permissions);
+   * } catch (error) {
+   *   console.error('Error retrieving role permissions:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized users can query role permissions.
+   * - This method can be used for auditing and verifying role configurations.
+   *
+   * Error handling:
+   * - Throws an error if the role does not exist.
+   * - Throws an error if there are database connectivity issues.
+   *
+   * Note: This method retrieves direct permissions assigned to the role and does not include
+   * permissions inherited from parent roles. For a complete permission set, consider implementing
+   * a method that includes inherited permissions.
+   */
   async getRolePermissions(roleId: RoleId): Promise<string[]> {
     try {
       return await getRolePermissions(this.supabase, roleId, this.logger);
