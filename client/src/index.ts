@@ -19,6 +19,7 @@ import {
 } from "./rbac";
 import {
   createPolicy,
+  deletePolicy,
   evaluatePolicies,
   getUserAttribute,
   setUserAttribute,
@@ -31,12 +32,13 @@ import {
   ApiKeyEntity,
   ApiKeySummary,
   ApiKeyMetadata,
+  ApiKeyId,
+  AuthResult,
+  Description,
   PermissionId,
   PermissionName,
-  AuthResult,
+  PolicyId,
   UserId,
-  ApiKeyId,
-  Description,
   RotateApiKeyResult,
   GroupId,
   RoleId,
@@ -1026,4 +1028,46 @@ export class KeyHippo {
     }
   }
 
+  /**
+   * Deletes an existing ABAC policy from the system.
+   *
+   * @param policyId - The unique identifier of the policy to be deleted.
+   * @returns A Promise resolving to a boolean indicating whether the deletion was successful.
+   *
+   * Policy deletion process:
+   * 1. Validates the input parameter.
+   * 2. Deletes the policy entry from the policies table within the ABAC schema.
+   * 3. Returns true if the policy was found and deleted, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const deleteSuccess = await keyHippo.deletePolicy('policy123');
+   *   console.log(`Policy deletion ${deleteSuccess ? 'successful' : 'failed'}`);
+   * } catch (error) {
+   *   console.error('Failed to delete policy:', error);
+   * }
+   * ```
+
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can delete policies.
+   * - Deleting policies affects the overall access control structure of the application.
+   * - Consider implementing a soft delete mechanism if policy history needs to be maintained.
+   *
+   * Error handling:
+   * - Throws an error if the policy deletion fails due to database issues.
+   * - Throws an error if there are database connectivity issues.
+   * - Returns false if the policy does not exist (but does not throw an error).
+   */
+  async deletePolicy(policyId: PolicyId): Promise<boolean> {
+    try {
+      return await deletePolicy(this.supabase, policyId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error deleting policy: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
 }
