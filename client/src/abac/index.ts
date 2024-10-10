@@ -1,8 +1,10 @@
+export { checkAbacPolicy } from "./checkAbacPolicy";
 export { createPolicy } from "./createPolicy";
 export { deletePolicy } from "./deletePolicy";
-export { updatePolicy } from "./updatePolicy";
 export { evaluatePolicies } from "./evaluatePolicies";
 export { getGroupAttribute } from "./getGroupAttribute";
+export { getPolicy } from "./getPolicy";
 export { getUserAttribute } from "./getUserAttribute";
 export { setGroupAttribute } from "./setGroupAttribute";
 export { setUserAttribute } from "./setUserAttribute";
+export { updatePolicy } from "./updatePolicy";

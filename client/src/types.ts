@@ -67,6 +67,27 @@ export type Message = string;
 export type PolicyId = string;
 
 /**
+ * Represents a policy in the system.
+ *
+ * This type corresponds to the 'policies' table in the database and includes
+ * fields for the policy's unique identifier, name, description, and the actual
+ * policy content stored as JSON.
+ */
+export type Policy = {
+  /** The unique identifier of the policy. */
+  id: PolicyId;
+
+  /** The name of the policy. Must be unique. */
+  name: string;
+
+  /** An optional description of the policy. */
+  description: string | null;
+
+  /** The actual policy content stored as a JSON object. */
+  policy: Record<string, any>;
+};
+
+/**
  * The unique identifier of a permission.
  */
 export type PermissionId = string;

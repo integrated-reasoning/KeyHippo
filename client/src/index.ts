@@ -19,14 +19,16 @@ import {
   userHasPermission,
 } from "./rbac";
 import {
+  checkAbacPolicy,
   createPolicy,
   deletePolicy,
-  updatePolicy,
   evaluatePolicies,
-  getUserAttribute,
-  setUserAttribute,
   getGroupAttribute,
+  getPolicy,
+  getUserAttribute,
   setGroupAttribute,
+  setUserAttribute,
+  updatePolicy,
 } from "./abac";
 import { authenticate } from "./auth";
 import {
@@ -698,6 +700,56 @@ export class KeyHippo {
       throw error;
     }
   }
+  /**
+   * Checks an ABAC policy for a specific user in the system.
+   *
+   * @param userId - The unique identifier of the user to check against the policy.
+   * @param policy - The policy object to evaluate.
+   * @returns A Promise resolving to a boolean indicating whether the policy check passed.
+   *
+   * Policy check process:
+   * 1. Retrieves the user's attributes from the user_attributes table.
+   * 2. Evaluates the policy based on its type (and, or, attribute_equals, attribute_contains, attribute_contained_by).
+   * 3. Returns true if the policy check passes, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const policy = { type: 'attribute_equals', attribute: 'role', value: 'admin' };
+   *   const policyPassed = await keyHippo.checkAbacPolicy('user123', policy);
+   *   console.log(`Policy check result: ${policyPassed ? 'PASS' : 'FAIL'}`);
+   * } catch (error) {
+   *   console.error('Failed to check ABAC policy:', error);
+   * }
+   * ```
+
+   *
+   * Security implications:
+   * - This function is crucial for enforcing access control decisions.
+   * - Ensure that policies are properly designed and tested to avoid unintended access.
+   * - Consider caching frequently checked policies or user attributes for performance.
+   *
+   * Error handling:
+   * - Throws an error if the user does not exist or has no attributes.
+   * - Throws an error if the policy type is unsupported.
+   * - Throws an error if there are database connectivity issues.
+   */
+  async checkAbacPolicy(userId: UserId, policy: Policy): Promise<boolean> {
+    try {
+      return await checkAbacPolicy(
+        this.supabase,
+        userId,
+        policy,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error checking ABAC policy: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
 
   /**
    * Creates a new ABAC (Attribute-Based Access Control) policy.
@@ -1318,6 +1370,51 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error retrieving group attribute: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Retrieves a policy from the ABAC system by its ID.
+   *
+   * @param policyId - The unique identifier of the policy to retrieve.
+   * @returns A Promise resolving to the Policy object.
+   *
+   * Policy retrieval process:
+   * 1. Validates the input parameter.
+   * 2. Queries the policies table within the ABAC schema for the specified policy ID.
+   * 3. Returns the policy data if found.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const policy = await keyHippo.getPolicy('policy123');
+   *   console.log('Retrieved policy:', policy);
+   * } catch (error) {
+   *   console.error('Failed to retrieve policy:', error);
+   * }
+   * ```
+
+   *
+   * Security implications:
+   * - Ensure that only authorized users or systems can retrieve policy information.
+   * - Be cautious about exposing sensitive policy details to unauthorized parties.
+   *
+   * Error handling:
+   * - Throws an error if the policy does not exist.
+   * - Throws an error if there are database connectivity issues.
+   */
+  async getPolicy(policyId: PolicyId): Promise<Policy> {
+    try {
+      return await getPolicy(
+        this.supabase,
+        policyId,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving policy: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
