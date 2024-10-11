@@ -32,35 +32,25 @@ import {
 } from "./abac";
 import { authenticate } from "./auth";
 import {
-  Logger,
   ApiKeyEntity,
-  ApiKeySummary,
-  ApiKeyMetadata,
   ApiKeyId,
+  ApiKeyMetadata,
+  ApiKeySummary,
   AuthResult,
   Description,
+  GroupId,
+  Logger,
   PermissionId,
   PermissionName,
+  Policy,
   PolicyId,
-  UserId,
-  RotateApiKeyResult,
-  GroupId,
   RoleId,
+  RotateApiKeyResult,
+  UserId,
 } from "./types";
 
 /* TODO: Add:
-1. ABAC (Attribute-Based Access Control):
-   - evaluatePolicies
-   - getGroupAttribute
-
-2. API Keys:
-   - No missing functions
-
 3. RBAC (Role-Based Access Control):
-   - createRole
-   - getParentRole
-   - getRolePermissions
-   - removeUserFromGroup
    - removePermissionFromRole
 
 4. Utils:
@@ -736,12 +726,7 @@ export class KeyHippo {
    */
   async checkAbacPolicy(userId: UserId, policy: Policy): Promise<boolean> {
     try {
-      return await checkAbacPolicy(
-        this.supabase,
-        userId,
-        policy,
-        this.logger,
-      );
+      return await checkAbacPolicy(this.supabase, userId, policy, this.logger);
     } catch (error) {
       this.logger.error(
         `Error checking ABAC policy: ${error instanceof Error ? error.message : String(error)}`,
@@ -749,7 +734,6 @@ export class KeyHippo {
       throw error;
     }
   }
-
 
   /**
    * Creates a new ABAC (Attribute-Based Access Control) policy.
@@ -1407,11 +1391,7 @@ export class KeyHippo {
    */
   async getPolicy(policyId: PolicyId): Promise<Policy> {
     try {
-      return await getPolicy(
-        this.supabase,
-        policyId,
-        this.logger,
-      );
+      return await getPolicy(this.supabase, policyId, this.logger);
     } catch (error) {
       this.logger.error(
         `Error retrieving policy: ${error instanceof Error ? error.message : String(error)}`,
