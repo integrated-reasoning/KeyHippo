@@ -12,6 +12,7 @@ import {
   createScope,
   getScope,
   getScopePermissions,
+  removePermissionFromScope,
   updateScope,
 } from "./scope";
 import {
@@ -1998,6 +1999,59 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error adding permission to scope: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+   * Removes a permission from a scope in the RBAC system.
+   *
+   * @param scopeId - The unique identifier of the scope.
+   * @param permissionId - The unique identifier of the permission to be removed from the scope.
+   * @returns A Promise resolving to a boolean indicating whether the removal was successful.
+   *
+   * Permission removal process:
+   * 1. Calls the 'remove_permission_from_scope' function with the provided scopeId and permissionId.
+   * 2. Removes the entry from the scope_permissions table within the KeyHippo schema.
+   * 3. Returns true if the permission was successfully removed from the scope, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const removed = await keyHippo.removePermissionFromScope('scope123', 'permission456');
+   *   if (removed) {
+   *     console.log('Permission successfully removed from scope');
+   *   } else {
+   *     console.log('Permission was not associated with the scope');
+   *   }
+   * } catch (error) {
+   *   console.error('Error removing permission from scope:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can remove permissions from scopes.
+   * - Removing permissions from scopes affects the overall permission structure of the application.
+   *
+   * Error handling:
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the scope or permission does not exist.
+   * - Returns false if the permission was not associated with the scope (but does not throw an error).
+   */
+  async removePermissionFromScope(
+    scopeId: ScopeId,
+    permissionId: PermissionId,
+  ): Promise<boolean> {
+    try {
+      return await removePermissionFromScope(
+        this.supabase,
+        scopeId,
+        permissionId,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error removing permission from scope: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
