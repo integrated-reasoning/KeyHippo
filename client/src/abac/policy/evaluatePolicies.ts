@@ -1,5 +1,5 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger } from "../types";
+import { Logger } from "../../types";
 import {
   logDebug,
   logInfo,
@@ -8,8 +8,8 @@ import {
   createDatabaseError,
   validateRpcResult,
   parseEvaluationResult,
-} from "../utils";
-import { logUserAttributes, logAllPolicies } from "../utils";
+} from "../../utils";
+import { logUserAttributes, logAllPolicies } from "../../utils";
 
 /**
  * Logs the attempt to evaluate policies for a user.

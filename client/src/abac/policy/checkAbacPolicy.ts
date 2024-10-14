@@ -1,6 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger, UserId, Policy } from "../types";
-import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
+import { Logger, UserId, Policy } from "../../types";
+import { logDebug, logInfo, logError, createDatabaseError } from "../../utils";
 
 /**
  * Logs the attempt to check an ABAC policy.

@@ -1,6 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger, PolicyId, Policy } from "../types";
-import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
+import { Logger, PolicyId, Policy } from "../../types";
+import { logDebug, logInfo, logError, createDatabaseError } from "../../utils";
 
 /**
  * Logs the attempt to retrieve a policy.

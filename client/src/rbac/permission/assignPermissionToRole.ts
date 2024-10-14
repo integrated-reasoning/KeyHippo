@@ -1,6 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger, RoleId, PermissionName } from "../types";
-import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
+import { Logger, RoleId, PermissionName } from "../../types";
+import { logDebug, logInfo, logError, createDatabaseError } from "../../utils";
 
 /**
  * Logs the attempt to assign a permission to a role.

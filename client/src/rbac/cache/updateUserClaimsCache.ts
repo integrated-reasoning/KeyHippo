@@ -1,6 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger } from "../types";
-import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
+import { Logger } from "../../types";
+import { logDebug, logInfo, logError, createDatabaseError } from "../../utils";
 
 /**
  * Logs the attempt to update the claims cache for a user.

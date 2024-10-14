@@ -1,6 +1,6 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger } from "../types";
-import { logDebug, logInfo, logError, createDatabaseError } from "../utils";
+import { Logger } from "../../types";
+import { logDebug, logInfo, logError, createDatabaseError } from "../../utils";
 
 /**
  * Executes the RPC call to add a user to a group with a specific role.

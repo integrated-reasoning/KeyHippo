@@ -1,7 +1,7 @@
 import { SupabaseClient } from "@supabase/supabase-js";
-import { Logger } from "../types";
-import { logDebug, logInfo } from "../utils/logging";
-import { handleError } from "../utils";
+import { Logger } from "../../types";
+import { logDebug, logInfo } from "../../utils/logging";
+import { handleError } from "../../utils";
 
 /**
  * Logs an attempt to retrieve a specific user attribute.
