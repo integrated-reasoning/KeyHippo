@@ -18,6 +18,7 @@ import {
   getParentRole,
   setParentRole,
   getRolePermissions,
+  updateGroup,
   updateUserClaimsCache,
   userHasPermission,
 } from "./rbac";
@@ -1448,6 +1449,63 @@ export class KeyHippo {
     }
   }
   /**
+ * Updates an existing group in the RBAC system.
+ *
+ * @param groupId - The unique identifier of the group to be updated.
+ * @param groupName - The new name for the group.
+ * @param description - The new description for the group.
+ * @returns A Promise resolving to a boolean indicating whether the update was successful.
+ *
+ * Group update process:
+ * 1. Calls the 'update_group' function with the provided groupId, groupName, and description.
+ * 2. Updates the existing entry in the groups table within the RBAC schema.
+ * 3. Returns true if the group was successfully updated, false otherwise.
+ *
+ * Usage example:
+ * ```typescript
+ * try {
+ *   const updated = await keyHippo.updateGroup('group123', 'Senior Administrators', 'Group for senior system administrators');
+ *   if (updated) {
+ *     console.log('Group successfully updated');
+ *   } else {
+ *     console.log('Group not found or update failed');
+ *   }
+ * } catch (error) {
+ *   console.error('Failed to update group:', error);
+ * }
+ * ```
+
+ *
+ * Security implications:
+ * - Ensure that only authorized administrators can update existing groups.
+ * - Updating groups may affect the overall permission structure of the application.
+ *
+ * Error handling:
+ * - Throws an error if the group update fails due to validation issues or conflicts.
+ * - Throws an error if there are database connectivity issues.
+ * - Returns false if the group does not exist (but does not throw an error).
+ */
+  async updateGroup(
+    groupId: GroupId,
+    groupName: string,
+    description: string,
+  ): Promise<boolean> {
+    try {
+      return await updateGroup(
+        this.supabase,
+        groupId,
+        groupName,
+        description,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error updating group: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
    * Deletes an existing group from the RBAC system.
    *
    * @param groupId - The unique identifier of the group to be deleted.
@@ -1535,4 +1593,5 @@ export class KeyHippo {
       throw error;
     }
   }
+
 }

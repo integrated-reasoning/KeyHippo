@@ -3,6 +3,7 @@ export { createGroup } from "./group/createGroup";
 export { deleteGroup } from "./group/deleteGroup";
 export { getGroup } from "./group/getGroup";
 export { removeUserFromGroup } from "./group/removeUserFromGroup";
+export { updateGroup } from "./group/updateGroup";
 export { assignPermissionToRole } from "./permission/assignPermissionToRole";
 export { createPermission } from "./permission/createPermission";
 export { userHasPermission } from "./permission/userHasPermission";
