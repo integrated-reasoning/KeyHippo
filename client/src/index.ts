@@ -18,6 +18,7 @@ import {
   getGroup,
   getParentRole,
   setParentRole,
+  getPermission,
   getRolePermissions,
   updateGroup,
   updateUserClaimsCache,
@@ -1641,4 +1642,47 @@ export class KeyHippo {
     }
   }
 
+  /**
+   * Retrieves an existing permission from the RBAC system.
+   *
+   * @param permissionId - The unique identifier of the permission to be retrieved.
+   * @returns A Promise resolving to the Permission object if found, or null if not found.
+   *
+   * Permission retrieval process:
+   * 1. Calls the 'get_permission' function with the provided permissionId.
+   * 2. Retrieves the permission entry from the permissions table within the RBAC schema.
+   * 3. Returns the Permission object if found, or null if not found.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const permission = await keyHippo.getPermission('permission123');
+   *   if (permission) {
+   *     console.log('Permission found:', permission);
+   *   } else {
+   *     console.log('Permission not found');
+   *   }
+   * } catch (error) {
+   *   console.error('Failed to retrieve permission:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized users can retrieve permission information.
+   * - Be cautious about exposing sensitive permission details to unauthorized parties.
+   *
+   * Error handling:
+   * - Throws an error if there are database connectivity issues.
+   * - Returns null if the permission does not exist (but does not throw an error).
+   */
+  async getPermission(permissionId: PermissionId): Promise<Permission | null> {
+    try {
+      return await getPermission(this.supabase, permissionId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving permission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
 }
