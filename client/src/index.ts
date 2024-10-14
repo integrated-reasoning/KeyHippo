@@ -13,6 +13,7 @@ import {
   createRole,
   createGroup,
   createPermission,
+  deleteGroup,
   getParentRole,
   setParentRole,
   getRolePermissions,
@@ -1441,6 +1442,51 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error creating group: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+   * Deletes an existing group from the RBAC system.
+   *
+   * @param groupId - The unique identifier of the group to be deleted.
+   * @returns A Promise resolving to a boolean indicating whether the deletion was successful.
+   *
+   * Group deletion process:
+   * 1. Calls the 'delete_group' function with the provided groupId.
+   * 2. Removes the group entry from the groups table within the RBAC schema.
+   * 3. Returns true if the group was successfully deleted, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const deleted = await keyHippo.deleteGroup('group123');
+   *   if (deleted) {
+   *     console.log('Group successfully deleted');
+   *   } else {
+   *     console.log('Group not found or deletion failed');
+   *   }
+   * } catch (error) {
+   *   console.error('Failed to delete group:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can delete existing groups.
+   * - Deleting groups may affect the overall permission structure of the application.
+   * - Consider implementing a soft delete mechanism if group history needs to be maintained.
+   *
+   * Error handling:
+   * - Throws an error if the group deletion fails due to database issues.
+   * - Throws an error if there are database connectivity issues.
+   * - Returns false if the group does not exist (but does not throw an error).
+   */
+  async deleteGroup(groupId: GroupId): Promise<boolean> {
+    try {
+      return await deleteGroup(this.supabase, groupId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error deleting group: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
