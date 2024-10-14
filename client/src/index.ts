@@ -11,6 +11,7 @@ import {
   addPermissionToScope,
   createScope,
   getScope,
+  getScopePermissions,
 } from "./scope";
 import {
   addUserToGroup,
@@ -1939,6 +1940,46 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error adding permission to scope: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+   * Retrieves all permissions associated with a specific scope.
+   *
+   * @param scopeId - The unique identifier of the scope.
+   * @returns A Promise resolving to an array of Permission objects associated with the scope.
+   *
+   * Permission retrieval process:
+   * 1. Calls the 'get_scope_permissions' function with the provided scopeId.
+   * 2. Retrieves all permissions associated with the scope from the scope_permissions and permissions tables.
+   * 3. Returns an array of Permission objects containing the permission ID and name.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const permissions = await keyHippo.getScopePermissions('scope123');
+   *   console.log('Permissions for the scope:', permissions);
+   * } catch (error) {
+   *   console.error('Error retrieving scope permissions:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized users can retrieve scope permissions.
+   * - This method can be used for auditing and verifying scope configurations.
+   *
+   * Error handling:
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the scope does not exist.
+   * - Returns an empty array if no permissions are associated with the scope.
+   */
+  async getScopePermissions(scopeId: ScopeId): Promise<Permission[]> {
+    try {
+      return await getScopePermissions(this.supabase, scopeId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving scope permissions: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
