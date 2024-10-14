@@ -15,6 +15,7 @@ import {
   createPermission,
   deleteGroup,
   deletePermission,
+  deleteRole,
   getGroup,
   getParentRole,
   setParentRole,
@@ -1798,4 +1799,51 @@ export class KeyHippo {
       throw error;
     }
   }
+  /**
+ * Deletes an existing role from the RBAC system.
+ *
+ * @param roleId - The unique identifier of the role to be deleted.
+ * @returns A Promise resolving to a boolean indicating whether the deletion was successful.
+ *
+ * Role deletion process:
+ * 1. Calls the 'delete_role' function with the provided roleId.
+ * 2. Removes the role entry from the roles table within the RBAC schema.
+ * 3. Returns true if the role was successfully deleted, false otherwise.
+ *
+ * Usage example:
+ * ```typescript
+ * try {
+ *   const deleted = await keyHippo.deleteRole('role123');
+ *   if (deleted) {
+ *     console.log('Role successfully deleted');
+ *   } else {
+ *     console.log('Role not found or deletion failed');
+ *   }
+ * } catch (error) {
+ *   console.error('Failed to delete role:', error);
+ * }
+ * ```
+
+ *
+ * Security implications:
+ * - Ensure that only authorized administrators can delete existing roles.
+ * - Deleting roles may affect the overall permission structure of the application.
+ * - Consider implementing a soft delete mechanism if role history needs to be maintained.
+ *
+ * Error handling:
+ * - Throws an error if the role deletion fails due to database issues.
+ * - Throws an error if there are database connectivity issues.
+ * - Returns false if the role does not exist (but does not throw an error).
+ */
+  async deleteRole(roleId: RoleId): Promise<boolean> {
+    try {
+      return await deleteRole(this.supabase, roleId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error deleting role: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
 }

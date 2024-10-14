@@ -12,6 +12,7 @@ export { removePermissionFromRole } from "./permission/removePermissionFromRole"
 export { updatePermission } from "./permission/updatePermission";
 export { userHasPermission } from "./permission/userHasPermission";
 export { createRole } from "./role/createRole";
+export { deleteRole } from "./role/deleteRole";
 export { getParentRole } from "./role/getParentRole";
 export { getRolePermissions } from "./role/getRolePermissions";
 export { setParentRole } from "./role/setParentRole";
