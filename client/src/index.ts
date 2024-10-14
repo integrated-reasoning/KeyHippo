@@ -7,7 +7,6 @@ import {
   rotateApiKey,
 } from "./api-keys";
 import {
-  assignPermissionToRole,
   addPermissionToScope,
   createScope,
   getScope,
@@ -17,20 +16,21 @@ import {
 } from "./scope";
 import {
   addUserToGroup,
-  removeUserFromGroup,
-  createRole,
+  assignPermissionToRole,
   createGroup,
   createPermission,
+  createRole,
   deleteGroup,
   deletePermission,
   deleteRole,
   getGroup,
   getParentRole,
-  setParentRole,
   getPermission,
   getRole,
   getRolePermissions,
   removePermissionFromRole,
+  removeUserFromGroup,
+  setParentRole,
   updateGroup,
   updatePermission,
   updateRole,
@@ -57,41 +57,21 @@ import {
   ApiKeySummary,
   AuthResult,
   Description,
+  Group,
   GroupId,
   Logger,
+  Permission,
   PermissionId,
   PermissionName,
   Policy,
   PolicyId,
+  Role,
   RoleId,
   RotateApiKeyResult,
+  Scope,
+  ScopeId,
   UserId,
 } from "./types";
-
-/* TODO: Add:
-3. RBAC (Role-Based Access Control):
-   - removePermissionFromRole
-
-4. Utils:
-   - No missing functions
-
-5. Root level:
-   - createGroup
-   - updateGroup
-   - deleteGroup
-   - getGroup
-   - createPermission
-   - updatePermission
-   - deletePermission
-   - getPermission
-   - createScope
-   - updateScope
-   - deleteScope
-   - getScope
-   - addPermissionToScope
-   - removePermissionFromScope
-   - getScopePermissions
-*/
 
 /**
  * KeyHippo: API Key Management and Access Control System
