@@ -12,6 +12,7 @@ import {
   createScope,
   getScope,
   getScopePermissions,
+  updateScope,
 } from "./scope";
 import {
   addUserToGroup,
@@ -1843,6 +1844,63 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error creating scope: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+ * Updates an existing scope in the system.
+ *
+ * @param scopeId - The unique identifier of the scope to be updated.
+ * @param name - The new name for the scope.
+ * @param description - The new description for the scope.
+ * @returns A Promise resolving to a boolean indicating whether the update was successful.
+ *
+ * Scope update process:
+ * 1. Calls the 'update_scope' function with the provided scopeId, name, and description.
+ * 2. Updates the existing entry in the scopes table within the KeyHippo schema.
+ * 3. Returns true if the scope was successfully updated, false otherwise.
+ *
+ * Usage example:
+ * ```typescript
+ * try {
+ *   const updated = await keyHippo.updateScope('scope123', 'UpdatedUserManagement', 'Updated scope for user management');
+ *   if (updated) {
+ *     console.log('Scope successfully updated');
+ *   } else {
+ *     console.log('Scope not found or update failed');
+ *   }
+ * } catch (error) {
+ *   console.error('Failed to update scope:', error);
+ * }
+ * ```
+
+ *
+ * Security implications:
+ * - Ensure that only authorized administrators can update existing scopes.
+ * - Updating scopes may affect the overall permission structure of the application.
+ *
+ * Error handling:
+ * - Throws an error if the scope update fails due to database issues.
+ * - Throws an error if there are database connectivity issues.
+ * - Returns false if the scope does not exist (but does not throw an error).
+ */
+  async updateScope(
+    scopeId: ScopeId,
+    name: string,
+    description: string,
+  ): Promise<boolean> {
+    try {
+      return await updateScope(
+        this.supabase,
+        scopeId,
+        name,
+        description,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error updating scope: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
