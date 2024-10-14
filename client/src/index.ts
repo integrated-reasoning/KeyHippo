@@ -25,6 +25,7 @@ import {
   removePermissionFromRole,
   updateGroup,
   updatePermission,
+  updateRole,
   updateUserClaimsCache,
   userHasPermission,
 } from "./rbac";
@@ -1796,6 +1797,63 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error retrieving permission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+ * Updates an existing role in the RBAC system.
+ *
+ * @param roleId - The unique identifier of the role to be updated.
+ * @param name - The new name for the role.
+ * @param description - The new description for the role.
+ * @returns A Promise resolving to a boolean indicating whether the update was successful.
+ *
+ * Role update process:
+ * 1. Calls the 'update_role' function with the provided roleId, name, and description.
+ * 2. Updates the existing entry in the roles table within the RBAC schema.
+ * 3. Returns true if the role was successfully updated, false otherwise.
+ *
+ * Usage example:
+ * ```typescript
+ * try {
+ *   const updated = await keyHippo.updateRole('role123', 'Senior Editor', 'Can edit and publish all content');
+ *   if (updated) {
+ *     console.log('Role successfully updated');
+ *   } else {
+ *     console.log('Role not found or update failed');
+ *   }
+ * } catch (error) {
+ *   console.error('Failed to update role:', error);
+ * }
+ * ```
+
+ *
+ * Security implications:
+ * - Ensure that only authorized administrators can update existing roles.
+ * - Updating roles may affect the overall permission structure of the application.
+ *
+ * Error handling:
+ * - Throws an error if the role update fails due to database issues.
+ * - Throws an error if there are database connectivity issues.
+ * - Returns false if the role does not exist (but does not throw an error).
+ */
+  async updateRole(
+    roleId: RoleId,
+    name: string,
+    description: string,
+  ): Promise<boolean> {
+    try {
+      return await updateRole(
+        this.supabase,
+        roleId,
+        name,
+        description,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error updating role: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }

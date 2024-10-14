@@ -18,3 +18,4 @@ export { getRole } from "./role/getRole";
 export { getRolePermissions } from "./role/getRolePermissions";
 export { setParentRole } from "./role/setParentRole";
 export { updateUserClaimsCache } from "./cache/updateUserClaimsCache";
+export { updateRole } from "./role/updateRole";
