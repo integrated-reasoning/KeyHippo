@@ -14,6 +14,7 @@ import {
   createGroup,
   createPermission,
   deleteGroup,
+  getGroup,
   getParentRole,
   setParentRole,
   getRolePermissions,
@@ -1487,6 +1488,49 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error deleting group: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+   * Retrieves an existing group from the RBAC system.
+   *
+   * @param groupId - The unique identifier of the group to be retrieved.
+   * @returns A Promise resolving to the Group object if found, or null if not found.
+   *
+   * Group retrieval process:
+   * 1. Calls the 'get_group' function with the provided groupId.
+   * 2. Retrieves the group entry from the groups table within the RBAC schema.
+   * 3. Returns the Group object if found, or null if not found.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const group = await keyHippo.getGroup('group123');
+   *   if (group) {
+   *     console.log('Group found:', group);
+   *   } else {
+   *     console.log('Group not found');
+   *   }
+   * } catch (error) {
+   *   console.error('Failed to retrieve group:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized users can retrieve group information.
+   * - Be cautious about exposing sensitive group details to unauthorized parties.
+   *
+   * Error handling:
+   * - Throws an error if there are database connectivity issues.
+   * - Returns null if the group does not exist (but does not throw an error).
+   */
+  async getGroup(groupId: GroupId): Promise<Group | null> {
+    try {
+      return await getGroup(this.supabase, groupId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving group: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
