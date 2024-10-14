@@ -20,6 +20,7 @@ import {
   setParentRole,
   getPermission,
   getRolePermissions,
+  removePermissionFromRole,
   updateGroup,
   updateUserClaimsCache,
   userHasPermission,
@@ -1401,6 +1402,60 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error retrieving policy: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Removes a permission from a role in the RBAC system.
+   *
+   * @param roleId - The unique identifier of the role from which the permission is being removed.
+   * @param permissionName - The name of the permission to remove from the role.
+   * @returns A Promise resolving to a boolean indicating whether the removal was successful.
+   *
+   * This method performs the following steps:
+   * 1. Calls the 'remove_permission_from_role' function with the provided roleId and permissionName.
+   * 2. Removes the permission-role association from the role_permissions table in the RBAC schema.
+   * 3. Returns true if the permission was successfully removed, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const removed = await keyHippo.removePermissionFromRole('role123', 'edit_user_profile');
+   *   if (removed) {
+   *     console.log('Permission successfully removed from role');
+   *   } else {
+   *     console.log('Permission was not associated with the role');
+   *   }
+   * } catch (error) {
+   *   console.error('Failed to remove permission from role:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can remove permissions from roles.
+   * - Removing permissions affects the access control structure of the application.
+   *
+   * Error handling:
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the role or permission does not exist.
+   * - Returns false if the permission was not associated with the role (but does not throw an error).
+   */
+  async removePermissionFromRole(
+    roleId: RoleId,
+    permissionName: PermissionName,
+  ): Promise<boolean> {
+    try {
+      return await removePermissionFromRole(
+        this.supabase,
+        roleId,
+        permissionName,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error removing permission from role: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
