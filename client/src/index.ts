@@ -8,6 +8,9 @@ import {
 } from "./api-keys";
 import {
   assignPermissionToRole,
+  addPermissionToScope,
+} from "./scope";
+import {
   addUserToGroup,
   removeUserFromGroup,
   createRole,
@@ -1797,6 +1800,59 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error retrieving permission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+   * Adds a permission to a scope in the RBAC system.
+   *
+   * @param scopeId - The unique identifier of the scope.
+   * @param permissionId - The unique identifier of the permission to be added to the scope.
+   * @returns A Promise resolving to a boolean indicating whether the addition was successful.
+   *
+   * Permission addition process:
+   * 1. Calls the 'add_permission_to_scope' function with the provided scopeId and permissionId.
+   * 2. Creates a new entry in the scope_permissions table within the KeyHippo schema.
+   * 3. Returns true if the permission was successfully added to the scope, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const added = await keyHippo.addPermissionToScope('scope123', 'permission456');
+   *   if (added) {
+   *     console.log('Permission successfully added to scope');
+   *   } else {
+   *     console.log('Permission was already associated with the scope');
+   *   }
+   * } catch (error) {
+   *   console.error('Error adding permission to scope:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can add permissions to scopes.
+   * - Adding permissions to scopes affects the overall permission structure of the application.
+   *
+   * Error handling:
+   * - Throws an error if there are database connectivity issues.
+   * - Throws an error if the scope or permission does not exist.
+   * - Returns false if the permission is already associated with the scope (but does not throw an error).
+   */
+  async addPermissionToScope(
+    scopeId: ScopeId,
+    permissionId: PermissionId,
+  ): Promise<boolean> {
+    try {
+      return await addPermissionToScope(
+        this.supabase,
+        scopeId,
+        permissionId,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error adding permission to scope: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
