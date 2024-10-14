@@ -14,6 +14,7 @@ export { userHasPermission } from "./permission/userHasPermission";
 export { createRole } from "./role/createRole";
 export { deleteRole } from "./role/deleteRole";
 export { getParentRole } from "./role/getParentRole";
+export { getRole } from "./role/getRole";
 export { getRolePermissions } from "./role/getRolePermissions";
 export { setParentRole } from "./role/setParentRole";
 export { updateUserClaimsCache } from "./cache/updateUserClaimsCache";

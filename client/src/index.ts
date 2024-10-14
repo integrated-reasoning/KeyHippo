@@ -20,6 +20,7 @@ import {
   getParentRole,
   setParentRole,
   getPermission,
+  getRole,
   getRolePermissions,
   removePermissionFromRole,
   updateGroup,
@@ -1846,4 +1847,48 @@ export class KeyHippo {
     }
   }
 
+  /**
+ * Retrieves an existing role from the RBAC system.
+ *
+ * @param roleId - The unique identifier of the role to be retrieved.
+ * @returns A Promise resolving to the Role object if found, or null if not found.
+ *
+ * Role retrieval process:
+ * 1. Calls the 'get_role' function with the provided roleId.
+ * 2. Retrieves the role entry from the roles table within the RBAC schema.
+ * 3. Returns the Role object if found, or null if not found.
+ *
+ * Usage example:
+ * ```typescript
+ * try {
+ *   const role = await keyHippo.getRole('role123');
+ *   if (role) {
+ *     console.log('Role found:', role);
+ *   } else {
+ *     console.log('Role not found');
+ *   }
+ * } catch (error) {
+ *   console.error('Failed to retrieve role:', error);
+ * }
+ * ```
+
+ *
+ * Security implications:
+ * - Ensure that only authorized users can retrieve role information.
+ * - Be cautious about exposing sensitive role details to unauthorized parties.
+ *
+ * Error handling:
+ * - Throws an error if there are database connectivity issues.
+ * - Returns null if the role does not exist (but does not throw an error).
+ */
+  async getRole(roleId: RoleId): Promise<Role | null> {
+    try {
+      return await getRole(this.supabase, roleId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving role: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
 }
