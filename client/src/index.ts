@@ -9,6 +9,7 @@ import {
 import {
   assignPermissionToRole,
   addPermissionToScope,
+  createScope,
 } from "./scope";
 import {
   addUserToGroup,
@@ -1800,6 +1801,46 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error retrieving permission: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+   * Creates a new scope in the system.
+   *
+   * @param name - The name of the scope to be created.
+   * @param description - A description of the scope's purpose or context.
+   * @returns A Promise resolving to the ScopeId of the newly created scope.
+   *
+   * Scope creation process:
+   * 1. Calls the 'create_scope' function with the provided name and description.
+   * 2. Creates a new entry in the scopes table within the KeyHippo schema.
+   * 3. Returns the ID of the newly created scope.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const newScopeId = await keyHippo.createScope('UserManagement', 'Scope for user management operations');
+   *   console.log(`New scope created with ID: ${newScopeId}`);
+   * } catch (error) {
+   *   console.error('Failed to create scope:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can create new scopes.
+   * - Creating scopes affects the overall permission structure of the application.
+   *
+   * Error handling:
+   * - Throws an error if the scope creation fails due to validation issues or conflicts.
+   * - Throws an error if there are database connectivity issues.
+   */
+  async createScope(name: string, description: string): Promise<ScopeId> {
+    try {
+      return await createScope(this.supabase, name, description, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error creating scope: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
