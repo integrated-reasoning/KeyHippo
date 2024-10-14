@@ -10,6 +10,7 @@ import {
   assignPermissionToRole,
   addPermissionToScope,
   createScope,
+  getScope,
 } from "./scope";
 import {
   addUserToGroup,
@@ -1841,6 +1842,50 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error creating scope: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+ * Retrieves an existing scope from the system.
+ *
+ * @param scopeId - The unique identifier of the scope to be retrieved.
+ * @returns A Promise resolving to the Scope object if found, or null if not found.
+ *
+ * Scope retrieval process:
+ * 1. Calls the 'get_scope' function with the provided scopeId.
+ * 2. Retrieves the scope entry from the scopes table within the KeyHippo schema.
+ * 3. Returns the Scope object if found, or null if not found.
+ *
+ * Usage example:
+ * ```typescript
+ * try {
+ *   const scope = await keyHippo.getScope('scope123');
+ *   if (scope) {
+ *     console.log('Scope found:', scope);
+ *   } else {
+ *     console.log('Scope not found');
+ *   }
+ * } catch (error) {
+ *   console.error('Failed to retrieve scope:', error);
+ * }
+ * ```
+
+ *
+ * Security implications:
+ * - Ensure that only authorized users can retrieve scope information.
+ * - Be cautious about exposing sensitive scope details to unauthorized parties.
+ *
+ * Error handling:
+ * - Throws an error if there are database connectivity issues.
+ * - Returns null if the scope does not exist (but does not throw an error).
+ */
+  async getScope(scopeId: ScopeId): Promise<Scope | null> {
+    try {
+      return await getScope(this.supabase, scopeId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error retrieving scope: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
