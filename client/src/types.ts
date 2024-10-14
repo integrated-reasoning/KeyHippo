@@ -27,14 +27,74 @@ export type UserId = string;
 export type GroupId = string;
 
 /**
+ * Represents a group in the RBAC system.
+ *
+ * This type corresponds to the 'groups' table in the database and includes
+ * fields for the group's unique identifier, name, description, and creation timestamp.
+ */
+export type Group = {
+  /** The unique identifier of the group. */
+  id: GroupId;
+
+  /** The name of the group. Must be unique. */
+  name: string;
+
+  /** An optional description of the group. */
+  description: string | null;
+
+  /** The timestamp when the group was created. */
+  created_at: Timestamp;
+};
+
+/**
  * The unique identifier of a role.
  */
 export type RoleId = string;
 
 /**
+ * Represents a role in the RBAC system.
+ *
+ * This type corresponds to the 'roles' table in the database and includes
+ * fields for the role's unique identifier, name, description, group ID, and creation timestamp.
+ */
+export type Role = {
+  /** The unique identifier of the role. */
+  id: RoleId;
+
+  /** The name of the role. Must be unique within a group. */
+  name: string;
+
+  /** An optional description of the role. */
+  description: string | null;
+
+  /** The ID of the group this role belongs to. */
+  group_id: GroupId;
+
+  /** The timestamp when the role was created. */
+  created_at: Timestamp;
+};
+
+/**
  * The unique identifier of a scope.
  */
 export type ScopeId = string;
+
+/**
+ * Represents a scope in the RBAC system.
+ *
+ * This type corresponds to the 'scopes' table in the database and includes
+ * fields for the scope's unique identifier, name, and description.
+ */
+export type Scope = {
+  /** The unique identifier of the scope. */
+  id: ScopeId;
+
+  /** The name of the scope. Must be unique. */
+  name: string;
+
+  /** An optional description of the scope. */
+  description: string | null;
+};
 
 /**
  * A description text.
