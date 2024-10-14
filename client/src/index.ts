@@ -22,6 +22,7 @@ import {
   getRolePermissions,
   removePermissionFromRole,
   updateGroup,
+  updatePermission,
   updateUserClaimsCache,
   userHasPermission,
 } from "./rbac";
@@ -1646,6 +1647,63 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error retrieving group: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Updates an existing permission in the RBAC system.
+   *
+   * @param permissionId - The unique identifier of the permission to be updated.
+   * @param name - The new name for the permission.
+   * @param description - The new description for the permission.
+   * @returns A Promise resolving to a boolean indicating whether the update was successful.
+   *
+   * Permission update process:
+   * 1. Calls the 'update_permission' function with the provided permissionId, name, and description.
+   * 2. Updates the permission entry in the permissions table within the RBAC schema.
+   * 3. Returns true if the permission was successfully updated, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const updated = await keyHippo.updatePermission('permission123', 'EditUser', 'Allows editing user profiles');
+   *   if (updated) {
+   *     console.log('Permission successfully updated');
+   *   } else {
+   *     console.log('Permission not found or update failed');
+   *   }
+   * } catch (error) {
+   *   console.error('Failed to update permission:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can update existing permissions.
+   * - Updating permissions may affect the overall access control structure of the application.
+   *
+   * Error handling:
+   * - Throws an error if the permission update fails due to database issues.
+   * - Throws an error if there are database connectivity issues.
+   * - Returns false if the permission does not exist (but does not throw an error).
+   */
+  async updatePermission(
+    permissionId: PermissionId,
+    name: PermissionName,
+    description: Description,
+  ): Promise<boolean> {
+    try {
+      return await updatePermission(
+        this.supabase,
+        permissionId,
+        name,
+        description,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error updating permission: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
