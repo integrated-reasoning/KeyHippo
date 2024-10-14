@@ -14,6 +14,7 @@ import {
   createGroup,
   createPermission,
   deleteGroup,
+  deletePermission,
   getGroup,
   getParentRole,
   setParentRole,
@@ -1589,6 +1590,52 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error retrieving group: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Deletes an existing permission from the RBAC system.
+   *
+   * @param permissionId - The unique identifier of the permission to be deleted.
+   * @returns A Promise resolving to a boolean indicating whether the deletion was successful.
+   *
+   * Permission deletion process:
+   * 1. Calls the 'delete_permission' function with the provided permissionId.
+   * 2. Removes the permission entry from the permissions table within the RBAC schema.
+   * 3. Returns true if the permission was successfully deleted, false otherwise.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const deleted = await keyHippo.deletePermission('permission123');
+   *   if (deleted) {
+   *     console.log('Permission successfully deleted');
+   *   } else {
+   *     console.log('Permission not found or deletion failed');
+   *   }
+   * } catch (error) {
+   *   console.error('Failed to delete permission:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can delete existing permissions.
+   * - Deleting permissions may affect the overall access control structure of the application.
+   * - Consider implementing a soft delete mechanism if permission history needs to be maintained.
+   *
+   * Error handling:
+   * - Throws an error if the permission deletion fails due to database issues.
+   * - Throws an error if there are database connectivity issues.
+   * - Returns false if the permission does not exist (but does not throw an error).
+   */
+  async deletePermission(permissionId: PermissionId): Promise<boolean> {
+    try {
+      return await deletePermission(this.supabase, permissionId, this.logger);
+    } catch (error) {
+      this.logger.error(
+        `Error deleting permission: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
