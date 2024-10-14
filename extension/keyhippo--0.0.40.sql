@@ -125,6 +125,47 @@ CREATE TABLE keyhippo.api_key_secrets (
     key_hash text NOT NULL
 );
 
+CREATE OR REPLACE FUNCTION keyhippo.is_authorized (target_resource regclass, required_permission text)
+    RETURNS boolean
+    AS $$
+DECLARE
+    v_user_id uuid;
+    v_user_id_text text;
+    v_is_authorized boolean;
+BEGIN
+    -- Get the current user ID from the JWT claim
+    v_user_id_text := current_setting('request.jwt.claim.sub', TRUE);
+    -- If no user ID is found or it's an empty string, return false
+    IF v_user_id_text IS NULL OR v_user_id_text = '' THEN
+        RETURN FALSE;
+    END IF;
+    -- Try to cast the user ID to UUID
+    BEGIN
+        v_user_id := v_user_id_text::uuid;
+    EXCEPTION
+        WHEN invalid_text_representation THEN
+            -- If casting fails, return false
+            RETURN FALSE;
+    END;
+    -- Check if the user has the required permission
+    SELECT
+        EXISTS (
+            SELECT
+                1
+            FROM
+                keyhippo_rbac.user_group_roles ugr
+                JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+                JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+            WHERE
+                ugr.user_id = v_user_id
+                AND p.name = required_permission) INTO v_is_authorized;
+    RETURN v_is_authorized;
+END;
+
+$$
+LANGUAGE plpgsql
+SECURITY DEFINER;
+
 -- Create indexes
 CREATE INDEX idx_api_key_metadata_user_id ON keyhippo.api_key_metadata (user_id);
 
@@ -604,7 +645,7 @@ BEGIN
         SELECT
             id INTO scope_id
         FROM
-            keyhippo.get_scope (id)
+            keyhippo.scopes
         WHERE
             name = scope_name;
         IF scope_id IS NULL THEN
@@ -935,7 +976,7 @@ BEGIN
         FROM
             keyhippo_rbac.user_group_roles ugr
             JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-            JOIN keyhippo_rbac.get_permission (rp.permission_id) p ON TRUE
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
         WHERE
             ugr.user_id = v_current_user_id
             AND ugr.group_id = p_group_id
@@ -946,7 +987,7 @@ END IF;
     SELECT
         id INTO v_role_id
     FROM
-        keyhippo_rbac.get_role (id)
+        keyhippo_rbac.roles
     WHERE
         name = p_role_name
         AND group_id = p_group_id;
@@ -1027,6 +1068,9 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.update_user_claims_cache (p_user_id uui
 DECLARE
     v_claims jsonb;
 BEGIN
+    IF p_user_id IS NULL THEN
+        RAISE EXCEPTION 'update_user_claims_cache called with NULL user_id';
+    END IF;
     -- Delete existing claims for the user
     DELETE FROM keyhippo_rbac.claims_cache
     WHERE user_id = p_user_id;
@@ -1655,7 +1699,7 @@ END
 $$;
 
 INSERT INTO keyhippo_rbac.roles (name, description, group_id)
-    VALUES ('supabase_auth_admin', 'Role for Supabase Admins', (
+    VALUES ('supabase_auth_admin', 'Role for Supabase Auth Admin', (
             SELECT
                 id
             FROM
