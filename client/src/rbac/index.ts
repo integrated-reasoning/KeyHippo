@@ -1,4 +1,5 @@
 export { addUserToGroup } from "./group/addUserToGroup";
+export { createGroup } from "./group/createGroup";
 export { removeUserFromGroup } from "./group/removeUserFromGroup";
 export { assignPermissionToRole } from "./permission/assignPermissionToRole";
 export { createPermission } from "./permission/createPermission";

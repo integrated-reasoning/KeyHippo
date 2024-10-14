@@ -11,6 +11,7 @@ import {
   addUserToGroup,
   removeUserFromGroup,
   createRole,
+  createGroup,
   createPermission,
   getParentRole,
   setParentRole,
@@ -1395,6 +1396,51 @@ export class KeyHippo {
     } catch (error) {
       this.logger.error(
         `Error retrieving policy: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+  /**
+   * Creates a new group in the RBAC system.
+   *
+   * @param groupName - The name of the group to be created.
+   * @param description - A description of the group's purpose or scope.
+   * @returns A Promise resolving to the GroupId of the newly created group.
+   *
+   * Group creation process:
+   * 1. Calls the 'create_group' function with the provided groupName and description.
+   * 2. Creates a new entry in the groups table within the RBAC schema.
+   * 3. Returns the ID of the newly created group.
+   *
+   * Usage example:
+   * ```typescript
+   * try {
+   *   const newGroupId = await keyHippo.createGroup('Administrators', 'Group for system administrators');
+   *   console.log(`New group created with ID: ${newGroupId}`);
+   * } catch (error) {
+   *   console.error('Failed to create group:', error);
+   * }
+   * ```
+   *
+   * Security implications:
+   * - Ensure that only authorized administrators can create new groups.
+   * - Creating groups affects the overall permission structure of the application.
+   *
+   * Error handling:
+   * - Throws an error if the group creation fails due to validation issues or conflicts.
+   * - Throws an error if there are database connectivity issues.
+   */
+  async createGroup(groupName: string, description: string): Promise<GroupId> {
+    try {
+      return await createGroup(
+        this.supabase,
+        groupName,
+        description,
+        this.logger,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Error creating group: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw error;
     }
