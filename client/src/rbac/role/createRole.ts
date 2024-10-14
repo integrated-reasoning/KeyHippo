@@ -37,7 +37,7 @@ const executeCreateRoleRpc = async (
   const { data, error } = await supabase
     .schema("keyhippo_rbac")
     .rpc("create_role", {
-      p_role_name: roleName,
+      p_name: roleName,
       p_group_id: groupId,
       p_description: description,
     })
