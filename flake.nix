@@ -18,11 +18,7 @@
           overlays = [ ];
         };
         buildInputs = with pkgs; [
-          nodejs_20
-          nodePackages.pnpm
-          nodePackages.ts-node
-          openssl
-          openssl.dev
+          supabase-cli
         ];
       in
       rec
