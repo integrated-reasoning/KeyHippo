@@ -1,5 +1,5 @@
 BEGIN;
-SET search_path TO keyhippo, public, auth;
+SET search_path TO keyhippo, keyhippo_rbac, public, auth;
 -- Create test users and set up authentication
 DO $$
 DECLARE
@@ -8,174 +8,108 @@ DECLARE
     admin_group_id uuid;
     admin_role_id uuid;
 BEGIN
-    RAISE NOTICE 'Debug: Creating test users';
-    -- Switch to a role with elevated privileges to insert users
-    SET local ROLE postgres;
     -- Insert users with explicit IDs
     INSERT INTO auth.users (id, email)
         VALUES (user1_id, 'user1@example.com'),
         (user2_id, 'user2@example.com');
-    RAISE NOTICE 'Debug: Users created with IDs: % and %', user1_id, user2_id;
     -- Store user IDs as settings for later use
     PERFORM
         set_config('test.user1_id', user1_id::text, TRUE);
     PERFORM
         set_config('test.user2_id', user2_id::text, TRUE);
-    RAISE NOTICE 'Debug: User IDs stored in settings';
-    -- Ensure 'Admin Group' exists
-    INSERT INTO keyhippo_rbac.groups (name, description)
-        VALUES ('Admin Group', 'Group for administrators')
-    ON CONFLICT (name)
-        DO UPDATE SET
-            description = EXCLUDED.description
-        RETURNING
-            id INTO admin_group_id;
-    RAISE NOTICE 'Debug: Admin Group created/updated with ID: %', admin_group_id;
-    -- Ensure 'Admin' role exists and is associated with 'Admin Group'
-    INSERT INTO keyhippo_rbac.roles (name, description, group_id)
-        VALUES ('Admin', 'Administrator role', admin_group_id)
-    ON CONFLICT (name, group_id)
-        DO UPDATE SET
-            description = EXCLUDED.description
-        RETURNING
-            id INTO admin_role_id;
-    RAISE NOTICE 'Debug: Admin Role created/updated with ID: %', admin_role_id;
-    -- Ensure 'manage_user_attributes' permission exists
-    INSERT INTO keyhippo_rbac.permissions (name, description)
-        VALUES ('manage_user_attributes', 'Permission to manage user attributes')
-    ON CONFLICT (name)
-        DO NOTHING;
-    RAISE NOTICE 'Debug: manage_user_attributes permission created/updated';
-    -- Assign 'manage_user_attributes' permission to 'Admin' role
-    INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
-    SELECT
-        admin_role_id,
-        id
-    FROM
-        keyhippo_rbac.permissions
-    WHERE
-        name = 'manage_user_attributes'
-    ON CONFLICT (role_id,
-        permission_id)
-        DO NOTHING;
-    RAISE NOTICE 'Debug: manage_user_attributes permission assigned to Admin role';
-    -- Assign user1 to 'Admin' role
-    INSERT INTO keyhippo_rbac.user_group_roles (user_id, group_id, role_id)
-        VALUES (user1_id, admin_group_id, admin_role_id)
-    ON CONFLICT (user_id, group_id, role_id)
-        DO NOTHING;
-    RAISE NOTICE 'Debug: User1 assigned to Admin role';
-    -- Update claims cache for user1
+    -- Initialize KeyHippo (this creates default groups and roles)
     PERFORM
-        keyhippo_rbac.update_user_claims_cache (user1_id);
-    RAISE NOTICE 'Debug: Claims cache updated for User1';
-    -- Set up authentication context for user1
-    PERFORM
-        set_config('request.jwt.claim.sub', user1_id::text, TRUE);
-    PERFORM
-        set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated')::text, TRUE);
-    RAISE NOTICE 'Debug: Authentication context set up for User1';
-END
-$$;
--- Log current user and session details
-DO $$
-DECLARE
-    CURRENT_USER text := CURRENT_USER;
-    SESSION_USER text := SESSION_USER;
-    search_path text;
-BEGIN
+        keyhippo.initialize_keyhippo ();
+    -- Get the Admin Group and Role IDs
     SELECT
-        setting INTO search_path
-    FROM
-        pg_settings
-    WHERE
-        name = 'search_path';
-    RAISE NOTICE 'Debug: Current user: %, Session user: %, Search path: %', CURRENT_USER, SESSION_USER, search_path;
-END
-$$;
--- Fetch and set group and role IDs
-DO $$
-DECLARE
-    admin_group uuid;
-    user_group uuid;
-    admin_role uuid;
-    user_role uuid;
-BEGIN
-    -- Fetch Admin Group ID
-    SELECT
-        id INTO admin_group
+        id INTO admin_group_id
     FROM
         keyhippo_rbac.groups
     WHERE
         name = 'Admin Group';
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Admin Group not found';
-    END IF;
-    RAISE NOTICE 'Debug: Admin Group ID fetched: %', admin_group;
-    -- Fetch User Group ID
     SELECT
-        id INTO user_group
-    FROM
-        keyhippo_rbac.groups
-    WHERE
-        name = 'User Group';
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'User Group not found';
-    END IF;
-    RAISE NOTICE 'Debug: User Group ID fetched: %', user_group;
-    -- Fetch Admin Role ID
-    SELECT
-        id INTO admin_role
+        id INTO admin_role_id
     FROM
         keyhippo_rbac.roles
     WHERE
         name = 'Admin'
-        AND group_id = admin_group;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Admin Role not found in Admin Group';
-    END IF;
-    RAISE NOTICE 'Debug: Admin Role ID fetched: %', admin_role;
-    -- Fetch User Role ID
-    SELECT
-        id INTO user_role
-    FROM
-        keyhippo_rbac.roles
-    WHERE
-        name = 'User'
-        AND group_id = user_group;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'User Role not found in User Group';
-    END IF;
-    RAISE NOTICE 'Debug: User Role ID fetched: %', user_role;
-    -- Set custom configuration parameters
+        AND group_id = admin_group_id;
+    -- Assign admin role to user1
+    -- Set up authentication for user1
     PERFORM
-        set_config('test.admin_group_id', admin_group::text, TRUE);
+        set_config('request.jwt.claim.sub', user1_id::text, TRUE);
     PERFORM
-        set_config('test.user_group_id', user_group::text, TRUE);
-    PERFORM
-        set_config('test.admin_role_id', admin_role::text, TRUE);
-    PERFORM
-        set_config('test.user_role_id', user_role::text, TRUE);
-    RAISE NOTICE 'Debug: Group and Role IDs set in configuration';
+        set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated', 'user_role', 'admin')::text, TRUE);
 END
 $$;
--- Test 1: Verify initial state (no API keys)
+-- Switch to authenticated role
+SET ROLE authenticated;
+-- Test RBAC initialization
 DO $$
 DECLARE
-    key_count bigint;
+    group_count integer;
+    role_count integer;
+    permission_count integer;
+    admin_role_permissions integer;
+    user_role_permissions integer;
 BEGIN
+    RAISE NOTICE 'Current user: %', CURRENT_USER;
+    RAISE NOTICE 'Current role: %', CURRENT_ROLE;
+    -- Check groups
     SELECT
-        COUNT(*) INTO key_count
+        COUNT(*) INTO group_count
     FROM
-        keyhippo.api_key_metadata
+        keyhippo_rbac.groups;
+    RAISE NOTICE 'Number of groups: %', group_count;
+    RAISE NOTICE 'Group names: %', array_agg(name)
+FROM
+    keyhippo_rbac.groups;
+    -- Check if the current user has permissions to see the groups
+    RAISE NOTICE 'Can select from groups: %', EXISTS (
+        SELECT
+            1
+        FROM
+            information_schema.table_privileges
+        WHERE
+            table_schema = 'keyhippo_rbac'
+            AND table_name = 'groups'
+            AND privilege_type = 'SELECT'
+            AND grantee = CURRENT_USER);
+    ASSERT group_count = 2,
+    'Two default groups should be created';
+    SELECT
+        COUNT(*) INTO role_count
+    FROM
+        keyhippo_rbac.roles;
+    ASSERT role_count = 2,
+    'Two default roles should be created';
+    SELECT
+        COUNT(*) INTO permission_count
+    FROM
+        keyhippo_rbac.permissions;
+    ASSERT permission_count = 6,
+    'Six default permissions should be created';
+    SELECT
+        COUNT(*) INTO admin_role_permissions
+    FROM
+        keyhippo_rbac.role_permissions rp
+        JOIN keyhippo_rbac.roles r ON rp.role_id = r.id
     WHERE
-        user_id = current_setting('test.user1_id')::uuid;
-    ASSERT key_count = 0,
-    'Initially, no API keys should exist for the user';
-    RAISE NOTICE 'Debug: Test 1 passed - No initial API keys';
+        r.name = 'Admin';
+    ASSERT admin_role_permissions = 6,
+    'Admin role should have all 6 permissions';
+    SELECT
+        COUNT(*) INTO user_role_permissions
+    FROM
+        keyhippo_rbac.role_permissions rp
+        JOIN keyhippo_rbac.roles r ON rp.role_id = r.id
+    WHERE
+        r.name = 'User';
+    ASSERT user_role_permissions = 1,
+    'User role should have 1 permission (manage_api_keys)';
 END
 $$;
--- Test 2: Create an API key
+-- Test create_api_key function
 DO $$
 DECLARE
     created_key_result record;
@@ -186,180 +120,167 @@ BEGIN
     FROM
         keyhippo.create_api_key ('Test API Key');
     ASSERT created_key_result.api_key IS NOT NULL,
-    'create_api_key should return a valid API key';
+    'create_api_key executes successfully for authenticated user';
     ASSERT created_key_result.api_key_id IS NOT NULL,
-    'create_api_key should return a valid API key ID';
+    'create_api_key returns a valid API key ID';
     SELECT
         COUNT(*) INTO key_count
     FROM
         keyhippo.api_key_metadata
     WHERE
-        id = created_key_result.api_key_id
+        description = 'Test API Key'
         AND user_id = current_setting('test.user1_id')::uuid;
     ASSERT key_count = 1,
-    'An API key should be created for the authenticated user';
-    RAISE NOTICE 'Debug: Test 2 passed - API key created successfully';
+    'An API key should be created with the given name for the authenticated user';
 END
 $$;
--- Continue with the rest of the tests, adding RAISE NOTICE statements for debugging...
--- Test 25: keyhippo.is_authorized function test
+-- Test verify_api_key function
 DO $$
 DECLARE
-    v_admin_group_id uuid;
-    v_admin_role_id uuid;
-    v_admin_user_id uuid;
-    v_manage_users_permission_id uuid;
-    v_regular_user_id uuid;
-    v_test_table_id oid;
-    v_user_group_id uuid;
-    v_user_role_id uuid;
-    v_view_reports_permission_id uuid;
+    created_key_result record;
+    verified_key_result record;
 BEGIN
-    RAISE NOTICE 'Debug: Starting test setup';
-    -- Create test users
-    INSERT INTO auth.users (id, email)
-        VALUES (gen_random_uuid (), 'admin@example.com')
-    RETURNING
-        id INTO v_admin_user_id;
-    RAISE NOTICE 'Debug: Admin user created with ID: %', v_admin_user_id;
-    INSERT INTO auth.users (id, email)
-        VALUES (gen_random_uuid (), 'user@example.com')
-    RETURNING
-        id INTO v_regular_user_id;
-    RAISE NOTICE 'Debug: Regular user created with ID: %', v_regular_user_id;
-    -- Insert groups if they don't exist
-    INSERT INTO keyhippo_rbac.groups (name)
-        VALUES ('Admin Group'),
-        ('User Group')
-    ON CONFLICT (name)
-        DO NOTHING;
-    RAISE NOTICE 'Debug: Groups inserted';
-    -- Retrieve group IDs
     SELECT
-        id INTO v_admin_group_id
+        * INTO created_key_result
     FROM
-        keyhippo_rbac.groups
-    WHERE
-        name = 'Admin Group';
-    RAISE NOTICE 'Debug: Admin group ID: %', v_admin_group_id;
+        keyhippo.create_api_key ('Verify Test Key');
     SELECT
-        id INTO v_user_group_id
+        * INTO verified_key_result
     FROM
-        keyhippo_rbac.groups
-    WHERE
-        name = 'User Group';
-    RAISE NOTICE 'Debug: User group ID: %', v_user_group_id;
-    -- Insert roles if they don't exist
-    INSERT INTO keyhippo_rbac.roles (name, group_id)
-        VALUES ('Admin', v_admin_group_id),
-        ('User', v_user_group_id)
-    ON CONFLICT (name, group_id)
-        DO NOTHING;
-    RAISE NOTICE 'Debug: Roles inserted';
-    -- Retrieve role IDs
-    SELECT
-        id INTO v_admin_role_id
-    FROM
-        keyhippo_rbac.roles
-    WHERE
-        name = 'Admin'
-        AND group_id = v_admin_group_id;
-    RAISE NOTICE 'Debug: Admin role ID: %', v_admin_role_id;
-    SELECT
-        id INTO v_user_role_id
-    FROM
-        keyhippo_rbac.roles
-    WHERE
-        name = 'User'
-        AND group_id = v_user_group_id;
-    RAISE NOTICE 'Debug: User role ID: %', v_user_role_id;
-    -- Create permissions
-    INSERT INTO keyhippo_rbac.permissions (name)
-        VALUES ('manage_users'),
-        ('view_reports')
-    ON CONFLICT (name)
-        DO NOTHING;
-    -- Retrieve permission IDs
-    SELECT
-        id INTO v_manage_users_permission_id
-    FROM
-        keyhippo_rbac.permissions
-    WHERE
-        name = 'manage_users';
-    SELECT
-        id INTO v_view_reports_permission_id
-    FROM
-        keyhippo_rbac.permissions
-    WHERE
-        name = 'view_reports';
-    RAISE NOTICE 'Debug: Permissions created/retrieved. manage_users ID: %, view_reports ID: %', v_manage_users_permission_id, v_view_reports_permission_id;
-    -- Assign permissions to roles
-    INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
-        VALUES (v_admin_role_id, v_manage_users_permission_id),
-        (v_admin_role_id, v_view_reports_permission_id),
-        (v_user_role_id, v_view_reports_permission_id)
-    ON CONFLICT (role_id, permission_id)
-        DO NOTHING;
-    RAISE NOTICE 'Debug: Permissions assigned to roles';
-    -- Assign users to roles
-    INSERT INTO keyhippo_rbac.user_group_roles (user_id, group_id, role_id)
-        VALUES (v_admin_user_id, v_admin_group_id, v_admin_role_id),
-        (v_regular_user_id, v_user_group_id, v_user_role_id)
-    ON CONFLICT (user_id, group_id, role_id)
-        DO NOTHING;
-    RAISE NOTICE 'Debug: Users assigned to roles';
-    -- Create a test table
-    CREATE TABLE IF NOT EXISTS public.test_reports (
-        id serial PRIMARY KEY,
-        report_data text
-    );
-    RAISE NOTICE 'Debug: Test table created';
-    SELECT
-        oid INTO v_test_table_id
-    FROM
-        pg_class
-    WHERE
-        relname = 'test_reports';
-    RAISE NOTICE 'Debug: Test table ID: %', v_test_table_id;
-    -- Test admin user permissions
-    SET LOCAL ROLE authenticated;
-    PERFORM
-        set_config('request.jwt.claim.sub', v_admin_user_id::text, TRUE);
-    RAISE NOTICE 'Debug: About to test admin permissions';
-    ASSERT keyhippo.is_authorized (v_test_table_id::regclass,
-        'manage_users') = TRUE,
-    'Admin should be authorized to manage users';
-    RAISE NOTICE 'Debug: Admin manage_users test passed';
-    ASSERT keyhippo.is_authorized (v_test_table_id::regclass,
-        'view_reports') = TRUE,
-    'Admin should be authorized to view reports';
-    RAISE NOTICE 'Debug: Admin view_reports test passed';
-    -- Test regular user permissions
-    PERFORM
-        set_config('request.jwt.claim.sub', v_regular_user_id::text, TRUE);
-    RAISE NOTICE 'Debug: About to test regular user permissions';
-    ASSERT keyhippo.is_authorized (v_test_table_id::regclass,
-        'manage_users') = FALSE,
-    'Regular user should not be authorized to manage users';
-    RAISE NOTICE 'Debug: Regular user manage_users test passed';
-    ASSERT keyhippo.is_authorized (v_test_table_id::regclass,
-        'view_reports') = TRUE,
-    'Regular user should be authorized to view reports';
-    RAISE NOTICE 'Debug: Regular user view_reports test passed';
-    -- Test non-existent permission
-    ASSERT keyhippo.is_authorized (v_test_table_id::regclass,
-        'non_existent_permission') = FALSE,
-    'Non-existent permission should return false';
-    RAISE NOTICE 'Debug: Non-existent permission test passed';
-    -- Test with null user
-    PERFORM
-        set_config('request.jwt.claim.sub', NULL, TRUE);
-    RAISE NOTICE 'Debug: About to test null user';
-    ASSERT keyhippo.is_authorized (v_test_table_id::regclass,
-        'view_reports') = FALSE,
-    'Null user should not be authorized';
-    RAISE NOTICE 'Debug: Null user test passed';
+        keyhippo.verify_api_key (created_key_result.api_key);
+    ASSERT verified_key_result.user_id = current_setting('test.user1_id')::uuid,
+    'verify_api_key should return the correct user_id';
+    ASSERT verified_key_result.scope_id IS NULL,
+    'verify_api_key should return NULL scope_id for default key';
+    ASSERT array_length(verified_key_result.permissions, 1) > 0,
+    'verify_api_key should return permissions';
 END
 $$;
--- ROLLBACK to ensure no test data persists
+-- Test revoke_api_key function
+DO $$
+DECLARE
+    created_key_result record;
+    revoke_result boolean;
+    key_is_revoked boolean;
+BEGIN
+    SELECT
+        * INTO created_key_result
+    FROM
+        keyhippo.create_api_key ('Revoke Test Key');
+    SELECT
+        * INTO revoke_result
+    FROM
+        keyhippo.revoke_api_key (created_key_result.api_key_id);
+    ASSERT revoke_result = TRUE,
+    'revoke_api_key should return TRUE for successful revocation';
+    SELECT
+        is_revoked INTO key_is_revoked
+    FROM
+        keyhippo.api_key_metadata
+    WHERE
+        id = created_key_result.api_key_id;
+    ASSERT key_is_revoked = TRUE,
+    'API key should be marked as revoked';
+END
+$$;
+-- Test rotate_api_key function
+DO $$
+DECLARE
+    created_key_result record;
+    rotated_key_result record;
+    old_key_revoked boolean;
+BEGIN
+    SELECT
+        * INTO created_key_result
+    FROM
+        keyhippo.create_api_key ('Rotate Test Key');
+    SELECT
+        * INTO rotated_key_result
+    FROM
+        keyhippo.rotate_api_key (created_key_result.api_key_id);
+    ASSERT rotated_key_result.new_api_key IS NOT NULL,
+    'rotate_api_key should return a new API key';
+    ASSERT rotated_key_result.new_api_key_id IS NOT NULL,
+    'rotate_api_key should return a new API key ID';
+    ASSERT rotated_key_result.new_api_key_id != created_key_result.api_key_id,
+    'New API key ID should be different from the old one';
+    SELECT
+        is_revoked INTO old_key_revoked
+    FROM
+        keyhippo.api_key_metadata
+    WHERE
+        id = created_key_result.api_key_id;
+    ASSERT old_key_revoked = TRUE,
+    'Old API key should be revoked after rotation';
+END
+$$;
+-- Test authorize function
+DO $$
+DECLARE
+    authorized boolean;
+BEGIN
+    SELECT
+        * INTO authorized
+    FROM
+        keyhippo.authorize ('manage_api_keys');
+    ASSERT authorized = TRUE,
+    'User should be authorized to manage API keys';
+    SELECT
+        * INTO authorized
+    FROM
+        keyhippo.authorize ('manage_groups');
+    ASSERT authorized = TRUE,
+    'Admin user should be authorized to manage groups';
+END
+$$;
+-- Test RBAC functions
+DO $$
+DECLARE
+    t_group_id uuid;
+    t_role_id uuid;
+    t_user_id uuid := current_setting('test.user1_id')::uuid;
+BEGIN
+    -- Test create_group
+    SELECT
+        * INTO t_group_id
+    FROM
+        keyhippo_rbac.create_group ('Test Group', 'A test group');
+    ASSERT t_group_id IS NOT NULL,
+    'create_group should return a valid group ID';
+    -- Test create_role
+    SELECT
+        * INTO t_role_id
+    FROM
+        keyhippo_rbac.create_role ('Test Role', 'A test role', t_group_id, 'user');
+    ASSERT t_role_id IS NOT NULL,
+    'create_role should return a valid role ID';
+    -- Test assign_role_to_user
+    PERFORM
+        keyhippo_rbac.assign_role_to_user (t_user_id, t_group_id, t_role_id);
+    ASSERT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.user_group_roles
+        WHERE
+            user_id = t_user_id
+            AND group_id = t_group_id
+            AND role_id = t_role_id),
+    'assign_role_to_user should assign the role to the user';
+    -- Test assign_permission_to_role
+    PERFORM
+        keyhippo_rbac.assign_permission_to_role (t_role_id, 'manage_api_keys');
+    ASSERT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo_rbac.role_permissions rp
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+        WHERE
+            rp.role_id = t_role_id
+            AND p.name = 'manage_api_keys'),
+    'assign_permission_to_role should assign the permission to the role';
+END
+$$;
+-- Clean up
 ROLLBACK;
