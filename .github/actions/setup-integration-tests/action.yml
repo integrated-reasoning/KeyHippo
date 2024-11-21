@@ -8,7 +8,7 @@ runs:
     - name: Cache Docker images
       uses: ScribeMD/docker-cache@0.5.0
       with:
-        key: docker-${{ runner.os }}-${{ hashFiles('./client/pnpm-lock.yaml') }}
+        key: docker-${{ runner.os }}-${{ hashFiles('./flake.lock') }}
 
     - name: Setup Supabase CLI
       uses: supabase/setup-cli@v1
@@ -16,7 +16,7 @@ runs:
         version: latest
 
     - name: Start Supabase
-      working-directory: ./client/tests
+      working-directory: ./
       shell: bash
       run: |
         supabase start
