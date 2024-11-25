@@ -46,6 +46,35 @@ BEGIN
         set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated', 'user_role', 'admin')::text, TRUE);
 END
 $$;
+-- Function to calculate performance statistics
+CREATE OR REPLACE FUNCTION calculate_performance_stats (execution_times double precision[])
+    RETURNS TABLE (
+        min_time double precision,
+        max_time double precision,
+        avg_time double precision,
+        median_time double precision,
+        stddev_time double precision,
+        percentile_90 double precision,
+        percentile_95 double precision,
+        percentile_99 double precision
+    )
+    AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        MIN(t),
+        MAX(t),
+        AVG(t),
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY t),
+        stddev(t),
+        percentile_cont(0.9) WITHIN GROUP (ORDER BY t),
+        percentile_cont(0.95) WITHIN GROUP (ORDER BY t),
+        percentile_cont(0.99) WITHIN GROUP (ORDER BY t)
+    FROM
+        unnest(execution_times) t;
+END;
+$$
+LANGUAGE plpgsql;
 -- Performance test function
 CREATE OR REPLACE FUNCTION run_performance_test (iterations integer DEFAULT 1000)
     RETURNS TABLE (
@@ -76,30 +105,14 @@ BEGIN
         end_time := clock_timestamp();
         execution_times := array_append(execution_times, EXTRACT(EPOCH FROM (end_time - start_time)));
     END LOOP;
+    RETURN QUERY
     SELECT
-        'RBAC authorization',
-        MIN(t),
-        MAX(t),
-        AVG(t),
-        percentile_cont(0.5) WITHIN GROUP (ORDER BY t),
-        stddev(t),
-        percentile_cont(0.9) WITHIN GROUP (ORDER BY t),
-        percentile_cont(0.95) WITHIN GROUP (ORDER BY t),
-        percentile_cont(0.99) WITHIN GROUP (ORDER BY t) INTO test_name,
-        min_time,
-        max_time,
-        avg_time,
-        median_time,
-        stddev_time,
-        percentile_90,
-        percentile_95,
-        percentile_99
+        'RBAC authorization'::text,
+        *
     FROM
-        unnest(execution_times) t;
-    RETURN NEXT;
-    -- Reset execution_times array
-    execution_times := ARRAY[]::double precision[];
+        calculate_performance_stats (execution_times);
     -- Test 2: API key creation
+    execution_times := ARRAY[]::double precision[];
     FOR i IN 1..iterations LOOP
         start_time := clock_timestamp();
         SELECT
@@ -109,30 +122,14 @@ BEGIN
         end_time := clock_timestamp();
         execution_times := array_append(execution_times, EXTRACT(EPOCH FROM (end_time - start_time)));
     END LOOP;
+    RETURN QUERY
     SELECT
-        'API key creation',
-        MIN(t),
-        MAX(t),
-        AVG(t),
-        percentile_cont(0.5) WITHIN GROUP (ORDER BY t),
-        stddev(t),
-        percentile_cont(0.9) WITHIN GROUP (ORDER BY t),
-        percentile_cont(0.95) WITHIN GROUP (ORDER BY t),
-        percentile_cont(0.99) WITHIN GROUP (ORDER BY t) INTO test_name,
-        min_time,
-        max_time,
-        avg_time,
-        median_time,
-        stddev_time,
-        percentile_90,
-        percentile_95,
-        percentile_99
+        'API key creation'::text,
+        *
     FROM
-        unnest(execution_times) t;
-    RETURN NEXT;
-    -- Reset execution_times array
-    execution_times := ARRAY[]::double precision[];
+        calculate_performance_stats (execution_times);
     -- Test 3: API key verification
+    execution_times := ARRAY[]::double precision[];
     FOR i IN 1..iterations LOOP
         start_time := clock_timestamp();
         PERFORM
@@ -140,28 +137,13 @@ BEGIN
         end_time := clock_timestamp();
         execution_times := array_append(execution_times, EXTRACT(EPOCH FROM (end_time - start_time)));
     END LOOP;
+    RETURN QUERY
     SELECT
-        'API key verification',
-        MIN(t),
-        MAX(t),
-        AVG(t),
-        percentile_cont(0.5) WITHIN GROUP (ORDER BY t),
-        stddev(t),
-        percentile_cont(0.9) WITHIN GROUP (ORDER BY t),
-        percentile_cont(0.95) WITHIN GROUP (ORDER BY t),
-        percentile_cont(0.99) WITHIN GROUP (ORDER BY t) INTO test_name,
-        min_time,
-        max_time,
-        avg_time,
-        median_time,
-        stddev_time,
-        percentile_90,
-        percentile_95,
-        percentile_99
+        'API key verification'::text,
+        *
     FROM
-        unnest(execution_times) t;
-    RETURN NEXT;
-    END;
+        calculate_performance_stats (execution_times);
+END;
 $$
 LANGUAGE plpgsql;
 -- Run performance tests
@@ -171,4 +153,5 @@ FROM
     run_performance_test (1000);
 -- Clean up
 DROP FUNCTION run_performance_test (integer);
+DROP FUNCTION calculate_performance_stats (double precision[]);
 ROLLBACK;

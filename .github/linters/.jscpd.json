@@ -3,7 +3,7 @@
   "maxSize": 0,
   "threshold": 0,
   "reporters": ["consoleFull", "console"],
-  "ignore": [".git"],
+  "ignore": [".git", "**/tests/**/*.sql"],
   "gitignore": true,
   "blame": true,
   "ignoreCase": true
