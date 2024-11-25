@@ -1,6 +1,6 @@
 # KeyHippo PostgreSQL Extension
 
-This directory contains the PostgreSQL extension for KeyHippo, which extends Supabase's Row Level Security (RLS) framework to support API key authentication.
+This directory contains the PostgreSQL extension for KeyHippo, which extends Supabase's Row Level Security (RLS) to support API key authentication and Role-Based Access Control (RBAC) directly in Postgres.
 
 ## Installation
 
@@ -8,8 +8,10 @@ To install the KeyHippo extension in your PostgreSQL database:
 
 ```sql
 select dbdev.install('keyhippo@keyhippo');
-create extension "keyhippo@keyhippo" version '0.0.40';
+create extension "keyhippo@keyhippo" version '0.0.41';
 ```
+
+Consult [database.dev](https://database.dev/keyhippo/keyhippo) for version updates.
 
 ## Usage in RLS Policies
 
@@ -18,25 +20,38 @@ Once installed, you can use KeyHippo functions in your RLS policies. For example
 ```sql
 CREATE POLICY "owner_access"
 ON "public"."resource_table"
+FOR SELECT
 USING (
-  auth.uid() = resource_table.owner_id
-  OR auth.keyhippo_check(resource_table.owner_id)
+  keyhippo.current_user_context().user_id = resource_table.owner_id
+  AND keyhippo.authorize('manage_resources')
 );
 ```
 
-This policy allows access when the user is authenticated via a session token (`auth.uid()`) or a valid API key associated with the resource owner (`auth.keyhippo_check()`).
+This policy allows access when the user is authenticated via a session token or a valid API key and has the 'manage_resources' permission.
 
 ## Available Functions
 
-- `auth.keyhippo_check(user_id UUID)`: Checks if the current request is authenticated with a valid API key for the given user ID.
-- `keyhippo.create_api_key(user_id UUID, description TEXT)`: Creates a new API key for the specified user.
-- `keyhippo.revoke_api_key(key_id UUID)`: Revokes an existing API key.
+- `keyhippo.create_api_key(description TEXT, scope_name TEXT DEFAULT NULL)`: Creates a new API key for the current authenticated user.
+- `keyhippo.revoke_api_key(api_key_id UUID)`: Revokes an existing API key.
+- `keyhippo.rotate_api_key(old_api_key_id UUID)`: Rotates an API key by revoking the old one and creating a new one.
+- `keyhippo.current_user_context()`: Returns the current user's ID, scope, and permissions.
+- `keyhippo.authorize(requested_permission keyhippo.app_permission)`: Checks if the current user has the requested permission.
 
-For a complete list of functions and their usage, please refer to our [API Reference](/docs/API-Reference.md).
+### RBAC Management Functions
+
+- `keyhippo_rbac.create_group(name TEXT, description TEXT)`: Creates a new group.
+- `keyhippo_rbac.create_role(name TEXT, description TEXT, group_id UUID, role_type keyhippo.app_role)`: Creates a new role within a group.
+- `keyhippo_rbac.assign_permission_to_role(role_id UUID, permission_name keyhippo.app_permission)`: Assigns a permission to a role.
+- `keyhippo_rbac.assign_role_to_user(user_id UUID, group_id UUID, role_id UUID)`: Assigns a role to a user within a group.
+
+### Impersonation Functions
+
+- `keyhippo_impersonation.login_as_user(user_id UUID)`: Allows an admin to impersonate another user.
+- `keyhippo_impersonation.logout()`: Ends an impersonation session.
 
 ## Contributing
 
-If you're interested in contributing to the development of the KeyHippo extension, please see our [Contributing Guide](/docs/Contributing.md).
+We welcome contributions to the KeyHippo extension. Please see our [Contributing Guide](/docs/Contributing.md) for more information.
 
 ## License
 
