@@ -118,13 +118,6 @@ jobs:
           PGPASSWORD=postgres psql -h localhost -p 54322 -U postgres -d postgres -v ON_ERROR_STOP=1 -f setup_commands.sql
 
       - uses: ./.github/actions/setup-environment
-      - name: Install dependencies
-        working-directory: ./
-        run: |
-          nix develop --command pnpm install
-      - name: Build project
-        working-directory: ./
-        run: nix develop --command pnpm run build
       - name: Run tests
         working-directory: ./
-        run: nix develop --command pnpm test
+        run: nix develop --command make pg_tap
