@@ -38,6 +38,8 @@ CREATE SCHEMA IF NOT EXISTS keyhippo_impersonation;
 -- Ensure required extensions are installed
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
 -- Create custom types
 CREATE TYPE keyhippo.app_permission AS ENUM (
     'manage_groups',
@@ -119,6 +121,151 @@ CREATE TABLE keyhippo.api_key_secrets (
     key_metadata_id uuid PRIMARY KEY REFERENCES keyhippo.api_key_metadata (id) ON DELETE CASCADE,
     key_hash text NOT NULL
 );
+
+CREATE TABLE keyhippo.audit_log (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    timestamp timestamptz NOT NULL DEFAULT now(),
+    action text NOT NULL,
+    table_name text,
+    data jsonb,
+    user_id uuid,
+    function_name text
+);
+
+CREATE OR REPLACE FUNCTION keyhippo.log_table_change ()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    v_data jsonb;
+    v_user_id uuid;
+BEGIN
+    -- Get the current user ID
+    SELECT
+        user_id INTO v_user_id
+    FROM
+        keyhippo.current_user_context ();
+    -- Prepare the data JSON
+    IF (TG_OP = 'DELETE') THEN
+        v_data := jsonb_build_object('old_data', to_jsonb (OLD));
+    ELSIF (TG_OP = 'UPDATE') THEN
+        v_data := jsonb_build_object('old_data', to_jsonb (OLD), 'new_data', to_jsonb (NEW));
+    ELSIF (TG_OP = 'INSERT') THEN
+        v_data := jsonb_build_object('new_data', to_jsonb (NEW));
+    END IF;
+    -- Insert into audit_log
+    INSERT INTO keyhippo.audit_log (action, table_name, data, user_id)
+        VALUES (TG_OP, TG_TABLE_NAME, v_data, v_user_id);
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql
+SECURITY DEFINER;
+
+CREATE TRIGGER audit_keyhippo_rbac_groups
+    AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.groups
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.log_table_change ();
+
+CREATE TRIGGER audit_keyhippo_rbac_roles
+    AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.roles
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.log_table_change ();
+
+CREATE TRIGGER audit_keyhippo_rbac_permissions
+    AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.permissions
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.log_table_change ();
+
+CREATE TRIGGER audit_keyhippo_rbac_role_permissions
+    AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.role_permissions
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.log_table_change ();
+
+CREATE TRIGGER audit_keyhippo_rbac_user_group_roles
+    AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.user_group_roles
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.log_table_change ();
+
+CREATE TRIGGER audit_keyhippo_scopes
+    AFTER INSERT OR UPDATE OR DELETE ON keyhippo.scopes
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.log_table_change ();
+
+CREATE TRIGGER audit_keyhippo_scope_permissions
+    AFTER INSERT OR UPDATE OR DELETE ON keyhippo.scope_permissions
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.log_table_change ();
+
+CREATE TRIGGER audit_keyhippo_api_key_metadata
+    AFTER INSERT OR UPDATE OR DELETE ON keyhippo.api_key_metadata
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.log_table_change ();
+
+CREATE OR REPLACE FUNCTION keyhippo.notify_audit_change ()
+    RETURNS TRIGGER
+    AS $$
+DECLARE
+    v_payload jsonb;
+    v_request_id bigint;
+BEGIN
+    -- Prepare the payload
+    v_payload = jsonb_build_object('id', NEW.id, 'timestamp', NEW.timestamp, 'action', NEW.action, 'table_name', NEW.table_name, 'user_id', NEW.user_id, 'function_name', NEW.function_name, 'data', NEW.data);
+    -- Make the HTTP request
+    SELECT
+        net.http_post ('https://app.keyhippo.com/api/echo', v_payload, headers := '{"Content-Type": "application/json", "API-KEY-HEADER": "<API KEY>"}'::jsonb) INTO v_request_id;
+    -- Log the request_id (optional, for debugging)
+    RAISE NOTICE 'HTTP Request ID: %', v_request_id;
+    RETURN NEW;
+END;
+$$
+LANGUAGE plpgsql
+SECURITY DEFINER;
+
+CREATE TRIGGER audit_log_notify
+    AFTER INSERT ON keyhippo.audit_log
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.notify_audit_change ();
+
+CREATE OR REPLACE FUNCTION keyhippo.is_authorized (target_resource regclass, required_permission text)
+    RETURNS boolean
+    AS $$
+DECLARE
+    v_user_id uuid;
+    v_user_id_text text;
+    v_is_authorized boolean;
+BEGIN
+    -- Get the current user ID from the JWT claim
+    v_user_id_text := current_setting('request.jwt.claim.sub', TRUE);
+    -- If no user ID is found or it's an empty string, return false
+    IF v_user_id_text IS NULL OR v_user_id_text = '' THEN
+        RETURN FALSE;
+    END IF;
+    -- Try to cast the user ID to UUID
+    BEGIN
+        v_user_id := v_user_id_text::uuid;
+    EXCEPTION
+        WHEN invalid_text_representation THEN
+            -- If casting fails, return false
+            RETURN FALSE;
+    END;
+    -- Check if the user has the required permission
+    SELECT
+        EXISTS (
+            SELECT
+                1
+            FROM
+                keyhippo_rbac.user_group_roles ugr
+                JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+                JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+            WHERE
+                ugr.user_id = v_user_id
+                AND p.name = required_permission) INTO v_is_authorized;
+    RETURN v_is_authorized;
+END;
+
+$$
+LANGUAGE plpgsql
+SECURITY DEFINER;
 
 -- Create Impersonation table
 CREATE TABLE IF NOT EXISTS keyhippo_impersonation.impersonation_state (
