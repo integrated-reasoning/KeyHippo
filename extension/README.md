@@ -8,7 +8,7 @@ To install the KeyHippo extension in your PostgreSQL database:
 
 ```sql
 select dbdev.install('keyhippo@keyhippo');
-create extension "keyhippo@keyhippo" version '0.0.41';
+create extension "keyhippo@keyhippo" version '0.0.42';
 ```
 
 Consult [database.dev](https://database.dev/keyhippo/keyhippo) for version updates.
