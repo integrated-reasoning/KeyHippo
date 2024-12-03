@@ -268,6 +268,18 @@ BEGIN
         AFTER INSERT ON keyhippo.audit_log
         FOR EACH ROW
         EXECUTE FUNCTION keyhippo_internal.notify_audit_change ( );
+    -- Update the config to enable HTTP logging
+    UPDATE
+        keyhippo_internal.config
+    SET
+        value = 'true'
+    WHERE
+        key = 'enable_http_logging';
+    -- If the config doesn't exist, insert it
+    INSERT INTO keyhippo_internal.config (key, value, description)
+        VALUES ('enable_http_logging', 'true', 'Flag to enable/disable HTTP logging')
+    ON CONFLICT (key)
+        DO NOTHING;
 END;
 $$;
 
@@ -278,7 +290,20 @@ CREATE OR REPLACE FUNCTION keyhippo_internal.disable_audit_log_notify ()
     SECURITY DEFINER
     AS $$
 BEGIN
+    -- Drop the trigger if it exists
     DROP TRIGGER IF EXISTS keyhippo_audit_log_notify ON keyhippo.audit_log;
+    -- Update the config to disable HTTP logging
+    UPDATE
+        keyhippo_internal.config
+    SET
+        value = 'false'
+    WHERE
+        key = 'enable_http_logging';
+    -- If the config doesn't exist, insert it
+    INSERT INTO keyhippo_internal.config (key, value, description)
+        VALUES ('enable_http_logging', 'false', 'Flag to enable/disable HTTP logging')
+    ON CONFLICT (key)
+        DO NOTHING;
 END;
 $$;
 
