@@ -1073,7 +1073,7 @@ DECLARE
 BEGIN
     -- Upsert the default value for the audit log endpoint
     INSERT INTO keyhippo_internal.config (key, value, description)
-        VALUES ('audit_log_endpoint', 'https://app.keyhippo.com/api/echo', 'Endpoint for sending audit log notifications')
+        VALUES ('audit_log_endpoint', 'https://app.keyhippo.com/api/ingest', 'Endpoint for sending audit log notifications')
     ON CONFLICT (key)
         DO UPDATE SET
             value = EXCLUDED.value, description = EXCLUDED.description;
