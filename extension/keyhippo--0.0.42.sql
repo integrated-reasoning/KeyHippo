@@ -239,10 +239,30 @@ $$
 LANGUAGE plpgsql
 SECURITY DEFINER;
 
-CREATE TRIGGER audit_log_notify
-    AFTER INSERT ON keyhippo.audit_log
-    FOR EACH ROW
-    EXECUTE FUNCTION keyhippo.notify_audit_change ();
+-- Function to enable the audit_log_notify trigger
+CREATE OR REPLACE FUNCTION keyhippo_internal.enable_audit_log_notify ()
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+BEGIN
+    CREATE TRIGGER keyhippo_audit_log_notify
+        AFTER INSERT ON keyhippo.audit_log
+        FOR EACH ROW
+        EXECUTE FUNCTION keyhippo.notify_audit_change ( );
+END;
+$$;
+
+-- Function to disable the audit_log_notify trigger
+CREATE OR REPLACE FUNCTION keyhippo_internal.disable_audit_log_notify ()
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+BEGIN
+    DROP TRIGGER IF EXISTS keyhippo_audit_log_notify ON keyhippo.audit_log;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION keyhippo.is_authorized (target_resource regclass, required_permission text)
     RETURNS boolean
