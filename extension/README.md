@@ -53,55 +53,11 @@ Rotate an API key (revoke the old one, create a new one):
 SELECT * FROM keyhippo.rotate_api_key('<old_api_key_id>');
 ```
 
-### RLS Policy Integration
-
-Example policy combining user authentication and permission checks:
-
-```sql
-CREATE POLICY "owner_access"
-ON "public"."resource_table"
-FOR SELECT
-USING (
-  keyhippo.current_user_context().user_id = resource_table.owner_id
-  AND keyhippo.authorize('manage_resources')
-);
-```
-
-This policy allows access when the user is authenticated and has the necessary permission.
-
-### RBAC Management
-
-Create and manage roles, groups, and permissions:
-
-```sql
--- Create a new group
-SELECT keyhippo_rbac.create_group('Developers', 'Group for developer users') AS group_id;
-
--- Create a new role
-SELECT keyhippo_rbac.create_role('Developer', 'Developer role', '<group_id>', 'user') AS role_id;
-
--- Assign a permission to the role
-SELECT keyhippo_rbac.assign_permission_to_role('<role_id>', 'manage_resources');
-
--- Assign the role to a user
-SELECT keyhippo_rbac.assign_role_to_user('<user_id>', '<group_id>', '<role_id>');
-```
-
-### Impersonation Functions
-
-Admins can act on behalf of other users:
-
-```sql
-CALL keyhippo_impersonation.login_as_user('<user_id>');
-
--- Perform actions as the impersonated user
-
-CALL keyhippo_impersonation.logout();
-```
+Full usage details can be found on [GitHub](https://github.com/integrated-reasoning/KeyHippo/blob/main/README.md).
 
 ## Integration with Supabase
 
-KeyHippo integrates seamlessly with Supabase and PostgREST, enabling API key and RBAC functionality within your existing stack.
+KeyHippo integrates with Supabase and PostgREST, enabling API key and RBAC functionality within your existing stack.
 
 ## Security Highlights
 
