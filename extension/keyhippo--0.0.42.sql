@@ -221,19 +221,6 @@ DECLARE
     v_installation_uuid uuid;
     v_enable_http_logging boolean;
 BEGIN
-    -- Get the endpoint and configuration from the config table
-    SELECT
-        value INTO v_endpoint
-    FROM
-        keyhippo_internal.config
-    WHERE
-        key = 'audit_log_endpoint';
-    SELECT
-        value::uuid INTO v_installation_uuid
-    FROM
-        keyhippo_internal.config
-    WHERE
-        key = 'installation_uuid';
     SELECT
         value::boolean INTO v_enable_http_logging
     FROM
@@ -242,6 +229,19 @@ BEGIN
         key = 'enable_http_logging';
     -- Only proceed if HTTP logging is enabled
     IF v_enable_http_logging THEN
+        -- Get the endpoint and configuration from the config table
+        SELECT
+            value INTO v_endpoint
+        FROM
+            keyhippo_internal.config
+        WHERE
+            key = 'audit_log_endpoint';
+        SELECT
+            value::uuid INTO v_installation_uuid
+        FROM
+            keyhippo_internal.config
+        WHERE
+            key = 'installation_uuid';
         -- Prepare the payload
         v_payload = jsonb_build_object('id', NEW.id, 'timestamp', NEW.timestamp, 'action', NEW.action, 'table_name', NEW.table_name, 'user_id', NEW.user_id, 'function_name', NEW.function_name, 'data', NEW.data, 'installation_uuid', v_installation_uuid);
         -- Make the HTTP request
