@@ -218,21 +218,38 @@ DECLARE
     v_payload jsonb;
     v_request_id bigint;
     v_endpoint text;
+    v_installation_uuid uuid;
+    v_enable_http_logging boolean;
 BEGIN
-    -- Get the endpoint from the config table
+    -- Get the endpoint and configuration from the config table
     SELECT
         value INTO v_endpoint
     FROM
         keyhippo_internal.config
     WHERE
         key = 'audit_log_endpoint';
-    -- Prepare the payload
-    v_payload = jsonb_build_object('id', NEW.id, 'timestamp', NEW.timestamp, 'action', NEW.action, 'table_name', NEW.table_name, 'user_id', NEW.user_id, 'function_name', NEW.function_name, 'data', NEW.data);
-    -- Make the HTTP request
     SELECT
-        net.http_post (v_endpoint, v_payload, headers := '{"Content-Type": "application/json", "API-KEY-HEADER": "<API KEY>"}'::jsonb) INTO v_request_id;
-    -- Log the request_id (optional, for debugging)
-    RAISE NOTICE 'HTTP Request ID: %', v_request_id;
+        value::uuid INTO v_installation_uuid
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'installation_uuid';
+    SELECT
+        value::boolean INTO v_enable_http_logging
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'enable_http_logging';
+    -- Only proceed if HTTP logging is enabled
+    IF v_enable_http_logging THEN
+        -- Prepare the payload
+        v_payload = jsonb_build_object('id', NEW.id, 'timestamp', NEW.timestamp, 'action', NEW.action, 'table_name', NEW.table_name, 'user_id', NEW.user_id, 'function_name', NEW.function_name, 'data', NEW.data, 'installation_uuid', v_installation_uuid);
+        -- Make the HTTP request
+        SELECT
+            net.http_post (v_endpoint, v_payload, headers := '{"Content-Type": "application/json"}'::jsonb) INTO v_request_id;
+        -- Log the request_id (optional, for debugging)
+        RAISE NOTICE 'HTTP Request ID: %', v_request_id;
+    END IF;
     RETURN NEW;
 END;
 $$
@@ -966,6 +983,55 @@ GRANT EXECUTE ON PROCEDURE keyhippo_impersonation.logout () TO authenticated, an
 
 GRANT SELECT, DELETE ON keyhippo_impersonation.impersonation_state TO anon;
 
+-- Function to send initial installation notification
+CREATE OR REPLACE FUNCTION keyhippo_internal.send_installation_notification ()
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+DECLARE
+    v_installation_uuid uuid;
+    v_endpoint text;
+    v_payload jsonb;
+    v_should_send boolean;
+BEGIN
+    -- Get installation UUID and endpoint from config
+    SELECT
+        value::uuid INTO v_installation_uuid
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'installation_uuid';
+    SELECT
+        value INTO v_endpoint
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'audit_log_endpoint';
+    -- Check if we should send the notification
+    SELECT
+        value::boolean INTO v_should_send
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'send_installation_notification';
+    IF v_should_send THEN
+        -- Prepare the payload
+        v_payload := jsonb_build_object('event', 'installation', 'installation_uuid', v_installation_uuid, 'timestamp', now());
+        -- Send the notification
+        PERFORM
+            net.http_post (url := v_endpoint, body := v_payload, headers := jsonb_build_object('Content-Type', 'application/json'));
+        -- Update the config to prevent future notifications
+        UPDATE
+            keyhippo_internal.config
+        SET
+            value = 'false'
+        WHERE
+            key = 'send_installation_notification';
+    END IF;
+END;
+$$;
+
 -- Initialization function
 CREATE OR REPLACE FUNCTION keyhippo.initialize_keyhippo ()
     RETURNS VOID
@@ -975,12 +1041,26 @@ CREATE OR REPLACE FUNCTION keyhippo.initialize_keyhippo ()
 DECLARE
     admin_group_id uuid;
     admin_role_id uuid;
+    installation_uuid uuid;
     user_group_id uuid;
     user_role_id uuid;
 BEGIN
     -- Upsert the default value for the audit log endpoint
     INSERT INTO keyhippo_internal.config (key, value, description)
         VALUES ('audit_log_endpoint', 'https://app.keyhippo.com/api/echo', 'Endpoint for sending audit log notifications')
+    ON CONFLICT (key)
+        DO UPDATE SET
+            value = EXCLUDED.value, description = EXCLUDED.description;
+    -- Generate and store installation UUID
+    installation_uuid := gen_random_uuid ();
+    INSERT INTO keyhippo_internal.config (key, value, description)
+        VALUES ('installation_uuid', installation_uuid::text, 'Unique identifier for this KeyHippo installation')
+    ON CONFLICT (key)
+        DO UPDATE SET
+            value = EXCLUDED.value, description = EXCLUDED.description;
+    -- Set HTTP logging to false by default
+    INSERT INTO keyhippo_internal.config (key, value, description)
+        VALUES ('enable_http_logging', 'false', 'Flag to enable/disable HTTP logging')
     ON CONFLICT (key)
         DO UPDATE SET
             value = EXCLUDED.value, description = EXCLUDED.description;
@@ -1061,6 +1141,23 @@ BEGIN
         VALUES ('default', 'Default scope for API keys')
     ON CONFLICT (name)
         DO NOTHING;
+    -- Set up the send_installation_notification config if it doesn't exist
+    INSERT INTO keyhippo_internal.config (key, value, description)
+        VALUES ('send_installation_notification', 'true', 'Flag to send initial installation notification')
+    ON CONFLICT (key)
+        DO NOTHING;
+    -- This ensures we don't overwrite an existing value
+    -- Send the installation notification only if the config is set to true
+    IF (
+        SELECT
+            value::boolean
+        FROM
+            keyhippo_internal.config
+        WHERE
+            key = 'send_installation_notification') THEN
+        PERFORM
+            keyhippo_internal.send_installation_notification ();
+    END IF;
 END;
 $$;
 
