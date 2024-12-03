@@ -1,5 +1,5 @@
 # keyhippo extension
 comment = 'RLS-compatible API keys for PostgreSQL'
-default_version = '0.0.42'
+default_version = '1.0.0'
 module_pathname = '$libdir/keyhippo/extension'
 relocatable = true
