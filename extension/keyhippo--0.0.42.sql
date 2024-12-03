@@ -171,42 +171,42 @@ $$
 LANGUAGE plpgsql
 SECURITY DEFINER;
 
-CREATE TRIGGER audit_keyhippo_rbac_groups
+CREATE TRIGGER keyhippo_audit_rbac_groups
     AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.groups
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
 
-CREATE TRIGGER audit_keyhippo_rbac_roles
+CREATE TRIGGER keyhippo_audit_rbac_roles
     AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.roles
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
 
-CREATE TRIGGER audit_keyhippo_rbac_permissions
+CREATE TRIGGER keyhippo_audit_rbac_permissions
     AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.permissions
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
 
-CREATE TRIGGER audit_keyhippo_rbac_role_permissions
+CREATE TRIGGER keyhippo_audit_rbac_role_permissions
     AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.role_permissions
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
 
-CREATE TRIGGER audit_keyhippo_rbac_user_group_roles
+CREATE TRIGGER keyhippo_audit_rbac_user_group_roles
     AFTER INSERT OR UPDATE OR DELETE ON keyhippo_rbac.user_group_roles
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
 
-CREATE TRIGGER audit_keyhippo_scopes
+CREATE TRIGGER keyhippo_audit_scopes
     AFTER INSERT OR UPDATE OR DELETE ON keyhippo.scopes
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
 
-CREATE TRIGGER audit_keyhippo_scope_permissions
+CREATE TRIGGER keyhippo_audit_scope_permissions
     AFTER INSERT OR UPDATE OR DELETE ON keyhippo.scope_permissions
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
 
-CREATE TRIGGER audit_keyhippo_api_key_metadata
+CREATE TRIGGER keyhippo_audit_api_key_metadata
     AFTER INSERT OR UPDATE OR DELETE ON keyhippo.api_key_metadata
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
@@ -1076,7 +1076,7 @@ END;
 $$;
 
 -- Create a trigger to assign the default role to new users
-CREATE TRIGGER assign_default_role_trigger
+CREATE TRIGGER keyhippo_assign_default_role_trigger
     AFTER INSERT ON auth.users
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.assign_default_role ();
