@@ -29,6 +29,9 @@
 -- Create KeyHippo schema
 CREATE SCHEMA IF NOT EXISTS keyhippo;
 
+-- Create KeyHippo internal schema
+CREATE SCHEMA IF NOT EXISTS keyhippo_internal;
+
 -- Create RBAC schema
 CREATE SCHEMA IF NOT EXISTS keyhippo_rbac;
 
@@ -53,6 +56,13 @@ CREATE TYPE keyhippo.app_permission AS ENUM (
 CREATE TYPE keyhippo.app_role AS ENUM (
     'admin',
     'user'
+);
+
+-- Create config table
+CREATE TABLE keyhippo_internal.config (
+    key text PRIMARY KEY,
+    value text NOT NULL,
+    description text
 );
 
 -- Create RBAC tables
@@ -207,12 +217,20 @@ CREATE OR REPLACE FUNCTION keyhippo.notify_audit_change ()
 DECLARE
     v_payload jsonb;
     v_request_id bigint;
+    v_endpoint text;
 BEGIN
+    -- Get the endpoint from the config table
+    SELECT
+        value INTO v_endpoint
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'audit_log_endpoint';
     -- Prepare the payload
     v_payload = jsonb_build_object('id', NEW.id, 'timestamp', NEW.timestamp, 'action', NEW.action, 'table_name', NEW.table_name, 'user_id', NEW.user_id, 'function_name', NEW.function_name, 'data', NEW.data);
     -- Make the HTTP request
     SELECT
-        net.http_post ('https://app.keyhippo.com/api/echo', v_payload, headers := '{"Content-Type": "application/json", "API-KEY-HEADER": "<API KEY>"}'::jsonb) INTO v_request_id;
+        net.http_post (v_endpoint, v_payload, headers := '{"Content-Type": "application/json", "API-KEY-HEADER": "<API KEY>"}'::jsonb) INTO v_request_id;
     -- Log the request_id (optional, for debugging)
     RAISE NOTICE 'HTTP Request ID: %', v_request_id;
     RETURN NEW;
@@ -797,6 +815,8 @@ END;
 $$;
 
 -- RLS Policies
+ALTER TABLE keyhippo_internal.config ENABLE ROW LEVEL SECURITY;
+
 ALTER TABLE keyhippo_rbac.groups ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE keyhippo_rbac.roles ENABLE ROW LEVEL SECURITY;
@@ -818,6 +838,9 @@ ALTER TABLE keyhippo.api_key_secrets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE keyhippo_impersonation.impersonation_state ENABLE ROW LEVEL SECURITY;
 
 -- Create RLS policies
+CREATE POLICY config_access_policy ON keyhippo_internal.config
+    USING (CURRENT_USER = 'postgres');
+
 CREATE POLICY groups_access_policy ON keyhippo_rbac.groups
     FOR ALL TO authenticated
         USING (keyhippo.authorize ('manage_groups'))
@@ -869,6 +892,10 @@ CREATE POLICY impersonation_state_access ON keyhippo_impersonation.impersonation
 
 -- Grants and Permissions
 GRANT USAGE ON SCHEMA keyhippo TO authenticated, anon;
+
+GRANT USAGE ON SCHEMA keyhippo_internal TO postgres;
+
+GRANT ALL PRIVILEGES ON keyhippo_internal.config TO postgres;
 
 GRANT USAGE ON SCHEMA keyhippo_rbac TO authenticated, anon;
 
@@ -931,6 +958,12 @@ DECLARE
     user_group_id uuid;
     user_role_id uuid;
 BEGIN
+    -- Upsert the default value for the audit log endpoint
+    INSERT INTO keyhippo_internal.config (key, value, description)
+        VALUES ('audit_log_endpoint', 'https://app.keyhippo.com/api/echo', 'Endpoint for sending audit log notifications')
+    ON CONFLICT (key)
+        DO UPDATE SET
+            value = EXCLUDED.value, description = EXCLUDED.description;
     -- Create default groups
     INSERT INTO keyhippo_rbac.groups (name, description)
         VALUES ('Admin Group', 'Group for administrators'),
