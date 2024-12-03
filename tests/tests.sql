@@ -1,5 +1,8 @@
 BEGIN;
 SET search_path TO keyhippo, keyhippo_rbac, public, auth;
+-- Enable audit log trigger
+SELECT
+    keyhippo_internal.enable_audit_log_notify ();
 -- Create test users and set up authentication
 DO $$
 DECLARE
