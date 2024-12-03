@@ -263,7 +263,8 @@ CREATE OR REPLACE FUNCTION keyhippo_internal.enable_audit_log_notify ()
     SECURITY DEFINER
     AS $$
 BEGIN
-    CREATE TRIGGER keyhippo_audit_log_notify
+    -- Create the trigger
+    CREATE OR REPLACE TRIGGER keyhippo_audit_log_notify
         AFTER INSERT ON keyhippo.audit_log
         FOR EACH ROW
         EXECUTE FUNCTION keyhippo_internal.notify_audit_change ( );
