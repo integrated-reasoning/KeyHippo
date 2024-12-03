@@ -211,7 +211,7 @@ CREATE TRIGGER keyhippo_audit_api_key_metadata
     FOR EACH ROW
     EXECUTE FUNCTION keyhippo.log_table_change ();
 
-CREATE OR REPLACE FUNCTION keyhippo.notify_audit_change ()
+CREATE OR REPLACE FUNCTION keyhippo_internal.notify_audit_change ()
     RETURNS TRIGGER
     AS $$
 DECLARE
@@ -266,7 +266,7 @@ BEGIN
     CREATE TRIGGER keyhippo_audit_log_notify
         AFTER INSERT ON keyhippo.audit_log
         FOR EACH ROW
-        EXECUTE FUNCTION keyhippo.notify_audit_change ( );
+        EXECUTE FUNCTION keyhippo_internal.notify_audit_change ( );
 END;
 $$;
 
