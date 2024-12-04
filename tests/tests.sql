@@ -285,5 +285,125 @@ BEGIN
     'assign_permission_to_role should assign the permission to the role';
 END
 $$;
+-- Test key expiry notification
+SET ROLE postgres;
+DO $$
+DECLARE
+    v_api_key_id uuid;
+    v_api_key text;
+    v_user_id uuid;
+    v_notification_sent boolean := FALSE;
+    v_audit_log_entry jsonb;
+BEGIN
+    -- Set expiry notification time to 2 hours for testing purposes
+    UPDATE
+        keyhippo_internal.config
+    SET
+        value = '2'
+    WHERE
+        key = 'key_expiry_notification_hours';
+    -- Ensure notifications are enabled
+    UPDATE
+        keyhippo_internal.config
+    SET
+        value = 'true'
+    WHERE
+        key = 'enable_key_expiry_notifications';
+    -- Create a test user
+    INSERT INTO auth.users (id, email)
+        VALUES (gen_random_uuid (), 'testuser@example.com')
+    RETURNING
+        id INTO v_user_id;
+    -- Login as the test user
+    PERFORM
+        set_config('request.jwt.claim.sub', v_user_id::text, TRUE);
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', v_user_id, 'role', 'authenticated')::text, TRUE);
+    -- Create a test API key using the real create_api_key function
+    SELECT
+        api_key,
+        api_key_id INTO v_api_key,
+        v_api_key_id
+    FROM
+        keyhippo.create_api_key ('Test Expiring Key');
+    RAISE NOTICE 'Created API key with ID: %', v_api_key_id;
+    -- Logout
+    PERFORM
+        set_config('request.jwt.claim.sub', '', TRUE);
+    PERFORM
+        set_config('request.jwt.claims', '', TRUE);
+    -- Update the expiry to trigger the notification
+    UPDATE
+        keyhippo.api_key_metadata
+    SET
+        expires_at = NOW() + INTERVAL '1 hour'
+    WHERE
+        id = v_api_key_id;
+    RAISE NOTICE 'Updated API key expiry';
+    -- Check if a notification was logged
+    SELECT
+        EXISTS (
+            SELECT
+                1
+            FROM
+                keyhippo.audit_log
+            WHERE
+                action = 'expiring_key'
+                AND (data ->> 'expiring_key')::jsonb ->> 'id' = v_api_key_id::text
+                AND timestamp > NOW() - INTERVAL '1 minute') INTO v_notification_sent;
+    IF v_notification_sent THEN
+        RAISE NOTICE 'Notification sent for key %', v_api_key_id;
+        -- Fetch and display the audit log entry
+        SELECT
+            data INTO v_audit_log_entry
+        FROM
+            keyhippo.audit_log
+        WHERE
+            action = 'expiring_key'
+            AND (data ->> 'expiring_key')::jsonb ->> 'id' = v_api_key_id::text
+        ORDER BY
+            timestamp DESC
+        LIMIT 1;
+        RAISE NOTICE 'Audit log entry: %', v_audit_log_entry;
+    ELSE
+        RAISE NOTICE 'No notification found for key %', v_api_key_id;
+        -- Display recent audit log entries for debugging
+        RAISE NOTICE 'Recent audit log entries:';
+        FOR v_audit_log_entry IN (
+            SELECT
+                data
+            FROM
+                keyhippo.audit_log
+            WHERE
+                timestamp > NOW() - INTERVAL '5 minutes'
+            ORDER BY
+                timestamp DESC
+            LIMIT 5)
+        LOOP
+            RAISE NOTICE '%', v_audit_log_entry;
+        END LOOP;
+    END IF;
+    -- Cleanup
+    DELETE FROM keyhippo.api_key_metadata
+    WHERE id = v_api_key_id;
+    DELETE FROM auth.users
+    WHERE id = v_user_id;
+    -- Assert the result
+    ASSERT v_notification_sent,
+    'An expiry notification should have been sent';
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Cleanup in case of error
+        IF v_api_key_id IS NOT NULL THEN
+            DELETE FROM keyhippo.api_key_metadata
+            WHERE id = v_api_key_id;
+            END IF;
+    IF v_user_id IS NOT NULL THEN
+        DELETE FROM auth.users
+        WHERE id = v_user_id;
+        END IF;
+    RAISE;
+END
+$$;
 -- Clean up
 ROLLBACK;

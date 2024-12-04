@@ -43,6 +43,8 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
 -- Create custom types
 CREATE TYPE keyhippo.app_permission AS ENUM (
     'manage_groups',
@@ -306,6 +308,186 @@ BEGIN
         DO NOTHING;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION keyhippo.notify_expiring_key ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+DECLARE
+    v_endpoint text;
+    v_installation_uuid uuid;
+    v_payload jsonb;
+    v_enable_notifications boolean;
+    v_notification_hours int;
+    v_request_id bigint;
+    v_response_status int;
+    v_response_body text;
+BEGIN
+    RAISE LOG 'notify_expiring_key triggered for key: %', NEW.id;
+    -- Check if notifications are enabled
+    SELECT
+        value::boolean INTO v_enable_notifications
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'enable_key_expiry_notifications';
+    IF NOT v_enable_notifications THEN
+        RAISE LOG 'Key expiry notifications are disabled';
+        RETURN NEW;
+    END IF;
+    -- Get the notification hours from config
+    SELECT
+        value::int INTO v_notification_hours
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'key_expiry_notification_hours';
+    RAISE LOG 'Notification hours: %, Key expires at: %, Current time: %', v_notification_hours, NEW.expires_at, NOW();
+    -- If the key is about to expire within the specified hours
+    IF NEW.expires_at <= NOW() + (v_notification_hours || ' hours')::interval AND (OLD.expires_at IS NULL OR OLD.expires_at > NOW() + (v_notification_hours || ' hours')::interval) THEN
+        RAISE LOG 'Key % is expiring soon, preparing notification', NEW.id;
+        -- Get the endpoint and installation UUID from the config table
+        SELECT
+            value INTO v_endpoint
+        FROM
+            keyhippo_internal.config
+        WHERE
+            key = 'audit_log_endpoint';
+        SELECT
+            value::uuid INTO v_installation_uuid
+        FROM
+            keyhippo_internal.config
+        WHERE
+            key = 'installation_uuid';
+        -- Prepare the payload
+        v_payload := jsonb_build_object('event', 'expiring_key', 'installation_uuid', v_installation_uuid, 'timestamp', now(), 'expiring_key', jsonb_build_object('id', NEW.id, 'user_id', NEW.user_id, 'description', NEW.description, 'expires_at', NEW.expires_at));
+        RAISE LOG 'Sending notification to endpoint: % with payload: %', v_endpoint, v_payload;
+        -- Send the notification with error handling
+        BEGIN
+            SELECT
+                (result).status,
+                (result).content::text,
+                (result).id INTO v_response_status,
+                v_response_body,
+                v_request_id
+            FROM
+                net.http_post (url := v_endpoint, body := v_payload, headers := jsonb_build_object('Content-Type', 'application/json')) AS result;
+            RAISE LOG 'Notification sent. Request ID: %, Status: %, Response: %', v_request_id, v_response_status, v_response_body;
+            IF v_response_status < 200 OR v_response_status >= 300 THEN
+                RAISE EXCEPTION 'HTTP request failed with status %', v_response_status;
+            END IF;
+        EXCEPTION
+            WHEN OTHERS THEN
+                RAISE LOG 'Error sending notification: %', SQLERRM;
+        END;
+    -- Insert into audit_log
+    INSERT INTO keyhippo.audit_log (action, table_name, data)
+        VALUES ('expiring_key', TG_TABLE_NAME, v_payload);
+    RAISE LOG 'Audit log entry created for expiring key %', NEW.id;
+ELSE
+    RAISE LOG 'Key % is not expiring soon, no notification sent', NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+
+$$;
+
+CREATE OR REPLACE FUNCTION keyhippo.notify_expiring_key ()
+    RETURNS TRIGGER
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+DECLARE
+    v_endpoint text;
+    v_installation_uuid uuid;
+    v_payload jsonb;
+    v_enable_notifications boolean;
+    v_notification_hours int;
+    v_request_id bigint;
+BEGIN
+    RAISE LOG 'notify_expiring_key triggered for key: %', NEW.id;
+    -- Check if notifications are enabled
+    SELECT
+        value::boolean INTO v_enable_notifications
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'enable_key_expiry_notifications';
+    IF NOT v_enable_notifications THEN
+        RAISE LOG 'Key expiry notifications are disabled';
+        RETURN NEW;
+    END IF;
+    -- Get the notification hours from config
+    SELECT
+        value::int INTO v_notification_hours
+    FROM
+        keyhippo_internal.config
+    WHERE
+        key = 'key_expiry_notification_hours';
+    RAISE LOG 'Notification hours: %, Key expires at: %, Current time: %', v_notification_hours, NEW.expires_at, NOW();
+    -- If the key is about to expire within the specified hours
+    IF NEW.expires_at <= NOW() + (v_notification_hours || ' hours')::interval AND (OLD.expires_at IS NULL OR OLD.expires_at > NOW() + (v_notification_hours || ' hours')::interval) THEN
+        RAISE LOG 'Key % is expiring soon, preparing notification', NEW.id;
+        -- Get the endpoint and installation UUID from the config table
+        SELECT
+            value INTO v_endpoint
+        FROM
+            keyhippo_internal.config
+        WHERE
+            key = 'audit_log_endpoint';
+        SELECT
+            value::uuid INTO v_installation_uuid
+        FROM
+            keyhippo_internal.config
+        WHERE
+            key = 'installation_uuid';
+        -- Prepare the payload
+        v_payload := jsonb_build_object('event', 'expiring_key', 'installation_uuid', v_installation_uuid, 'timestamp', now(), 'expiring_key', jsonb_build_object('id', NEW.id, 'user_id', NEW.user_id, 'description', NEW.description, 'expires_at', NEW.expires_at));
+        RAISE LOG 'Sending notification to endpoint: % with payload: %', v_endpoint, v_payload;
+        -- Send the notification
+        SELECT
+            net.http_post (url := v_endpoint, body := v_payload, headers := jsonb_build_object('Content-Type', 'application/json')) INTO v_request_id;
+        RAISE LOG 'Notification sent. Request ID: %', v_request_id;
+        -- Insert into audit_log
+        INSERT INTO keyhippo.audit_log (action, table_name, data)
+            VALUES ('expiring_key', TG_TABLE_NAME, v_payload);
+        RAISE LOG 'Audit log entry created for expiring key %', NEW.id;
+    ELSE
+        RAISE LOG 'Key % is not expiring soon, no notification sent', NEW.id;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER keyhippo_notify_expiring_key_trigger
+    BEFORE UPDATE OF expires_at ON keyhippo.api_key_metadata
+    FOR EACH ROW
+    EXECUTE FUNCTION keyhippo.notify_expiring_key ();
+
+CREATE OR REPLACE FUNCTION keyhippo.update_expiring_keys ()
+    RETURNS VOID
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+BEGIN
+    -- Update expires_at for keys that are about to expire
+    UPDATE
+        keyhippo.api_key_metadata
+    SET
+        expires_at = expires_at
+    WHERE
+        expires_at <= NOW() + INTERVAL '1 day'
+        AND is_revoked = FALSE;
+END;
+$$;
+
+SELECT
+    cron.schedule ('0 * * * *', $$
+        SELECT
+            keyhippo.update_expiring_keys ();
+
+$$);
 
 CREATE OR REPLACE FUNCTION keyhippo.is_authorized (target_resource regclass, required_permission text)
     RETURNS boolean
@@ -1071,6 +1253,13 @@ DECLARE
     user_group_id uuid;
     user_role_id uuid;
 BEGIN
+    -- Add configurations for key expiry notifications
+    INSERT INTO keyhippo_internal.config (key, value, description)
+        VALUES ('key_expiry_notification_hours', '72', 'Number of hours before key expiry to send notification'),
+        ('enable_key_expiry_notifications', 'true', 'Flag to enable/disable key expiry notifications')
+    ON CONFLICT (key)
+        DO UPDATE SET
+            value = EXCLUDED.value, description = EXCLUDED.description;
     -- Upsert the default value for the audit log endpoint
     INSERT INTO keyhippo_internal.config (key, value, description)
         VALUES ('audit_log_endpoint', 'https://app.keyhippo.com/api/ingest', 'Endpoint for sending audit log notifications')
