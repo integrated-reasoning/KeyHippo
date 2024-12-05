@@ -983,6 +983,8 @@ BEGIN
     -- Set session timeout
     PERFORM
         set_config('session.impersonation_expires', (NOW() + INTERVAL '1 hour')::text, TRUE);
+    -- Log the impersonation for debugging
+    RAISE NOTICE 'Impersonation successful. User ID: %, Role: %, JWT Claims: %', auth_user.id, COALESCE(auth_user.role, 'authenticated'), current_setting('request.jwt.claims', TRUE);
 END;
 $$;
 
@@ -1058,6 +1060,85 @@ BEGIN
     RAISE NOTICE 'Logout successful. Original role: %', v_original_role;
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION keyhippo_impersonation.generate_random_user_data ()
+    RETURNS TABLE (
+        id uuid,
+        email text,
+        encrypted_password text,
+        email_confirmed_at timestamptz,
+        last_sign_in_at timestamptz,
+        raw_app_meta_data jsonb,
+        raw_user_meta_data jsonb,
+        is_super_admin boolean,
+        created_at timestamptz,
+        updated_at timestamptz,
+        phone text,
+        phone_confirmed_at timestamptz,
+        confirmation_token text,
+        confirmation_sent_at timestamptz,
+        recovery_token text,
+        recovery_sent_at timestamptz,
+        email_change_token_new text,
+        email_change text,
+        email_change_sent_at timestamptz,
+        aud text,
+        banned_until timestamptz,
+        ROLE text
+    )
+    AS $$
+DECLARE
+    random_string text;
+BEGIN
+    id := gen_random_uuid ();
+    random_string := encode(gen_random_bytes(8), 'hex');
+    email := random_string || '@example.com';
+    encrypted_password := crypt('password', gen_salt('bf'));
+    email_confirmed_at := now() - (random() * interval '90 days');
+    last_sign_in_at := now() - (random() * interval '30 days');
+    raw_app_meta_data := jsonb_build_object('provider', 'email', 'providers', ARRAY['email']);
+    raw_user_meta_data := jsonb_build_object('name', 'Test User ' || random_string);
+    is_super_admin := FALSE;
+    created_at := now() - (random() * interval '180 days');
+    updated_at := created_at + (random() * (now() - created_at));
+    phone := '+1' || lpad(floor(random() * 10000000000)::text, 10, '0');
+    phone_confirmed_at := NULL;
+    confirmation_token := encode(gen_random_bytes(32), 'hex');
+    confirmation_sent_at := created_at;
+    recovery_token := NULL;
+    recovery_sent_at := NULL;
+    email_change_token_new := NULL;
+    email_change := NULL;
+    email_change_sent_at := NULL;
+    aud := 'authenticated';
+    banned_until := NULL;
+    RETURN NEXT;
+END;
+$$
+LANGUAGE plpgsql
+VOLATILE;
+
+-- Function to create a new auth.user for testing
+CREATE OR REPLACE FUNCTION keyhippo_impersonation.generate_new_user ()
+    RETURNS uuid
+    AS $$
+DECLARE
+    new_user_id uuid;
+BEGIN
+    INSERT INTO auth.users (id, email, encrypted_password, email_confirmed_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data, is_super_admin, created_at, updated_at, phone, phone_confirmed_at, confirmation_token, confirmation_sent_at, recovery_token, recovery_sent_at, email_change_token_new, email_change, email_change_sent_at, aud, banned_until, ROLE)
+    SELECT
+        *
+    FROM
+        keyhippo_impersonation.generate_random_user_data ()
+    RETURNING
+        id INTO new_user_id;
+    -- The default role assignment should be handled by the trigger automatically
+    RETURN new_user_id;
+END;
+$$
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER;
 
 -- RLS Policies
 ALTER TABLE keyhippo_internal.config ENABLE ROW LEVEL SECURITY;
