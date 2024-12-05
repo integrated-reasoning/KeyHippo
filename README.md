@@ -31,7 +31,7 @@ Features:
 
 ```sql
 select dbdev.install('keyhippo@keyhippo');
-create extension "keyhippo@keyhippo" version '1.1.0';
+create extension "keyhippo@keyhippo" version '1.2.0';
 ```
 
 Consult [database.dev](https://database.dev/keyhippo/keyhippo) for version updates.
