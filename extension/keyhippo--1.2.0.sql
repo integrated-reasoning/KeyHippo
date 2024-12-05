@@ -52,7 +52,8 @@ CREATE TYPE keyhippo.app_permission AS ENUM (
     'manage_permissions',
     'manage_scopes',
     'manage_user_attributes',
-    'manage_api_keys'
+    'manage_api_keys',
+    'manage_access_requests'
 );
 
 CREATE TYPE keyhippo.app_role AS ENUM (
@@ -65,6 +66,17 @@ CREATE TABLE keyhippo_internal.config (
     key text PRIMARY KEY,
     value text NOT NULL,
     description text
+);
+
+-- Create access requests table
+CREATE TABLE keyhippo.access_requests (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid (),
+    user_id uuid NOT NULL,
+    resource_name text NOT NULL,
+    action text NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 -- Create RBAC tables
@@ -488,6 +500,72 @@ SELECT
             keyhippo.update_expiring_keys ();
 
 $$);
+
+CREATE OR REPLACE FUNCTION keyhippo.request_access (p_resource_name text, p_action text)
+    RETURNS uuid
+    AS $$
+DECLARE
+    v_request_id uuid;
+BEGIN
+    INSERT INTO keyhippo.access_requests (user_id, resource_name, action)
+        VALUES (auth.uid (), p_resource_name, p_action)
+    RETURNING
+        id INTO v_request_id;
+    -- TODO: PERFORM keyhippo.notify_access_request(v_request_id);
+    RETURN v_request_id;
+END;
+$$
+LANGUAGE plpgsql
+SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION keyhippo.is_granted_access (p_resource_name text, p_action text)
+    RETURNS boolean
+    AS $$
+DECLARE
+    v_status text;
+BEGIN
+    SELECT
+        status INTO v_status
+    FROM
+        keyhippo.access_requests
+    WHERE
+        user_id = auth.uid ()
+        AND resource_name = p_resource_name
+        AND action = p_action
+        AND created_at > (now() - interval '24 hours')
+    ORDER BY
+        created_at DESC
+    LIMIT 1;
+    IF v_status IS NULL THEN
+        PERFORM
+            keyhippo.request_access (p_resource_name, p_action);
+        RETURN FALSE;
+    END IF;
+    RETURN v_status = 'approved';
+END;
+$$
+LANGUAGE plpgsql
+SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION keyhippo.review_access_request (p_request_id uuid, p_approved boolean)
+    RETURNS void
+    AS $$
+BEGIN
+    UPDATE
+        keyhippo.access_requests
+    SET
+        status = CASE WHEN p_approved THEN
+            'approved'
+        ELSE
+            'denied'
+        END,
+        updated_at = now()
+    WHERE
+        id = p_request_id;
+END;
+$$
+LANGUAGE plpgsql
+SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION keyhippo.is_authorized (target_resource regclass, required_permission text)
     RETURNS boolean
@@ -1143,6 +1221,8 @@ SECURITY DEFINER;
 -- RLS Policies
 ALTER TABLE keyhippo_internal.config ENABLE ROW LEVEL SECURITY;
 
+ALTER TABLE keyhippo.access_requests ENABLE ROW LEVEL SECURITY;
+
 ALTER TABLE keyhippo_rbac.groups ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE keyhippo_rbac.roles ENABLE ROW LEVEL SECURITY;
@@ -1166,6 +1246,32 @@ ALTER TABLE keyhippo_impersonation.impersonation_state ENABLE ROW LEVEL SECURITY
 -- Create RLS policies
 CREATE POLICY config_access_policy ON keyhippo_internal.config
     USING (CURRENT_USER = 'postgres');
+
+-- Create policy for users to view their own requests
+CREATE POLICY access_requests_view_own ON keyhippo.access_requests
+    FOR SELECT TO authenticated
+        USING (user_id = auth.uid ()
+            OR user_id = (
+                SELECT
+                    user_id
+                FROM
+                    keyhippo.current_user_context ()));
+
+-- Create policy for users to insert their own requests
+CREATE POLICY access_requests_insert_own ON keyhippo.access_requests
+    FOR INSERT TO authenticated
+        WITH CHECK (user_id = auth.uid ()
+        OR user_id = (
+            SELECT
+                user_id
+            FROM
+                keyhippo.current_user_context ()));
+
+-- Create policy for admins to view and manage all requests
+CREATE POLICY access_requests_manage_all ON keyhippo.access_requests
+    FOR ALL TO authenticated
+        USING (keyhippo.authorize ('manage_access_requests'))
+        WITH CHECK (keyhippo.authorize ('manage_access_requests'));
 
 CREATE POLICY groups_access_policy ON keyhippo_rbac.groups
     FOR ALL TO authenticated
@@ -1225,7 +1331,15 @@ GRANT ALL PRIVILEGES ON keyhippo_internal.config TO postgres;
 
 GRANT USAGE ON SCHEMA keyhippo_rbac TO authenticated, anon;
 
+GRANT SELECT, INSERT ON keyhippo.access_requests TO authenticated;
+
 -- Grant EXECUTE on functions
+GRANT EXECUTE ON FUNCTION keyhippo.request_access (text, text) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo.is_granted_access (text, text) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo.review_access_request (uuid, boolean) TO authenticated;
+
 GRANT EXECUTE ON FUNCTION keyhippo.create_api_key (text, text) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo.verify_api_key (text) TO authenticated;
@@ -1407,7 +1521,8 @@ BEGIN
         ('manage_permissions', 'Manage permissions'),
         ('manage_scopes', 'Manage scopes'),
         ('manage_api_keys', 'Manage API keys'),
-        ('manage_user_attributes', 'Manage user attributes')
+        ('manage_user_attributes', 'Manage user attributes'),
+        ('manage_access_requests', 'Manage access requests')
     ON CONFLICT (name)
         DO NOTHING;
     -- Assign all permissions to the Admin role
@@ -1417,6 +1532,23 @@ BEGIN
         id
     FROM
         keyhippo_rbac.permissions
+    ON CONFLICT (role_id,
+        permission_id)
+        DO NOTHING;
+    -- Add 'manage_access_requests' permission
+    INSERT INTO keyhippo_rbac.permissions (name, description)
+        VALUES ('manage_access_requests', 'Manage access requests')
+    ON CONFLICT (name)
+        DO NOTHING;
+    -- Assign 'manage_access_requests' permission to the Admin role
+    INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
+    SELECT
+        admin_role_id,
+        id
+    FROM
+        keyhippo_rbac.permissions
+    WHERE
+        name = 'manage_access_requests'
     ON CONFLICT (role_id,
         permission_id)
         DO NOTHING;

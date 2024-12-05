@@ -90,8 +90,8 @@ FROM
         COUNT(*) INTO permission_count
     FROM
         keyhippo_rbac.permissions;
-    ASSERT permission_count = 6,
-    'Six default permissions should be created';
+    ASSERT permission_count = 7,
+    'Seven default permissions should be created';
     SELECT
         COUNT(*) INTO admin_role_permissions
     FROM
@@ -99,8 +99,8 @@ FROM
         JOIN keyhippo_rbac.roles r ON rp.role_id = r.id
     WHERE
         r.name = 'Admin';
-    ASSERT admin_role_permissions = 6,
-    'Admin role should have all 6 permissions';
+    ASSERT admin_role_permissions = 7,
+    'Admin role should have all 7 permissions';
     SELECT
         COUNT(*) INTO user_role_permissions
     FROM
