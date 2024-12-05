@@ -405,5 +405,238 @@ EXCEPTION
     RAISE;
 END
 $$;
+-- Test access request functions
+--SET ROLE authenticated;
+DO $$
+DECLARE
+    user1_id uuid := current_setting('test.user1_id')::uuid;
+    user2_id uuid := current_setting('test.user2_id')::uuid;
+    request_id1 uuid;
+    request_id2 uuid;
+    access_granted boolean;
+    visible_requests int;
+    debug_info text;
+BEGIN
+    -- Set up JWT claims for user1 (admin)
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated', 'user_role', 'admin')::text, TRUE);
+    -- Test request_access function for user1
+    SELECT
+        keyhippo.request_access ('test_resource', 'read') INTO request_id1;
+    -- Switch to user2
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user2_id, 'role', 'authenticated', 'user_role', 'user')::text, TRUE);
+    -- Test request_access function for user2
+    SELECT
+        keyhippo.request_access ('test_resource', 'write') INTO request_id2;
+    -- Check that user2 can only see their own request
+    SELECT
+        COUNT(*) INTO visible_requests
+    FROM
+        keyhippo.access_requests;
+    SELECT
+        current_setting('keyhippo.debug', TRUE) INTO debug_info;
+    RAISE NOTICE 'User2 visible requests: %, Debug info: %', visible_requests, debug_info;
+    ASSERT visible_requests = 1,
+    'User2 should only see their own request';
+    -- Verify user2 can't see user1's request
+    ASSERT NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            user_id = user1_id), 'User2 should not be able to see user1''s requests';
+    -- Switch back to user1 (admin)
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated', 'user_role', 'admin')::text, TRUE);
+    -- Verify admin can see all requests
+    SELECT
+        COUNT(*) INTO visible_requests
+    FROM
+        keyhippo.access_requests;
+    SELECT
+        current_setting('keyhippo.debug', TRUE) INTO debug_info;
+    RAISE NOTICE 'Admin visible requests: %, Debug info: %', visible_requests, debug_info;
+    ASSERT visible_requests = 2,
+    'Admin should be able to see all requests';
+END
+$$;
+DO $$
+DECLARE
+    user1_id uuid := current_setting('test.user1_id')::uuid;
+    user2_id uuid := current_setting('test.user2_id')::uuid;
+    request_id uuid;
+    access_granted boolean;
+BEGIN
+    -- Set up JWT claims for user1 (admin)
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated', 'user_role', 'admin')::text, TRUE);
+    -- Test request_access function
+    SELECT
+        keyhippo.request_access ('test_resource', 'read') INTO request_id;
+    ASSERT request_id IS NOT NULL,
+    'request_access should return a valid request ID';
+    -- Verify the request was created
+    ASSERT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            id = request_id
+            AND user_id = user1_id
+            AND resource_name = 'test_resource'
+            AND action = 'read'),
+    'Access request should be created in the database';
+    -- Test is_granted_access function (should return false for a new request)
+    SELECT
+        keyhippo.is_granted_access ('test_resource', 'read') INTO access_granted;
+    ASSERT access_granted = FALSE,
+    'Access should not be granted for a new request';
+    -- Test review_access_request function
+    PERFORM
+        keyhippo.review_access_request (request_id, TRUE);
+    -- Verify the request was approved
+    ASSERT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            id = request_id
+            AND status = 'approved'),
+    'Access request should be approved';
+    -- Test is_granted_access function again (should now return true)
+    SELECT
+        keyhippo.is_granted_access ('test_resource', 'read') INTO access_granted;
+    ASSERT access_granted = TRUE,
+    'Access should be granted after approval';
+    -- Test access request for another user
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user2_id, 'role', 'authenticated', 'user_role', 'user')::text, TRUE);
+    SELECT
+        keyhippo.request_access ('test_resource', 'write') INTO request_id;
+    ASSERT request_id IS NOT NULL,
+    'request_access should work for another user';
+    -- Verify the new user can't see other user's requests
+    ASSERT NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            user_id = user1_id), 'User should not be able to see other users requests';
+    -- Switch back to the admin user
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated', 'user_role', 'admin')::text, TRUE);
+    -- Verify admin can see all requests
+    ASSERT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            user_id = user2_id), 'Admin should be able to see all user requests';
+END
+$$;
+-- Test access request functions and RLS policies
+DO $$
+DECLARE
+    user1_id uuid := current_setting('test.user1_id')::uuid;
+    user2_id uuid := current_setting('test.user2_id')::uuid;
+    request_id1 uuid;
+    request_id2 uuid;
+    access_granted boolean;
+    visible_requests int;
+BEGIN
+    -- Set up JWT claims for user1 (admin)
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated', 'user_role', 'admin')::text, TRUE);
+    -- Test request_access function for user1
+    SELECT
+        keyhippo.request_access ('test_resource', 'read') INTO request_id1;
+    ASSERT request_id1 IS NOT NULL,
+    'request_access should return a valid request ID for user1';
+    -- Verify the request was created for user1
+    ASSERT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            id = request_id1
+            AND user_id = user1_id
+            AND resource_name = 'test_resource'
+            AND action = 'read'),
+    'Access request should be created in the database for user1';
+    -- Switch to user2
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user2_id, 'role', 'authenticated', 'user_role', 'user')::text, TRUE);
+    -- Test request_access function for user2
+    SELECT
+        keyhippo.request_access ('test_resource', 'write') INTO request_id2;
+    ASSERT request_id2 IS NOT NULL,
+    'request_access should return a valid request ID for user2';
+    -- Verify the request was created for user2
+    ASSERT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            id = request_id2
+            AND user_id = user2_id
+            AND resource_name = 'test_resource'
+            AND action = 'write'),
+    'Access request should be created in the database for user2';
+    -- Check that user2 can only see their own request
+    SELECT
+        COUNT(*) INTO visible_requests
+    FROM
+        keyhippo.access_requests;
+    ASSERT visible_requests = 1,
+    'User2 should only see their own request';
+    -- Verify user2 can't see user1's request
+    ASSERT NOT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            user_id = user1_id), 'User2 should not be able to see user1''s requests';
+    -- Switch back to user1 (admin)
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user1_id, 'role', 'authenticated', 'user_role', 'admin')::text, TRUE);
+    -- Verify admin can see all requests
+    SELECT
+        COUNT(*) INTO visible_requests
+    FROM
+        keyhippo.access_requests;
+    ASSERT visible_requests = 2,
+    'Admin should be able to see all requests';
+    -- Test review_access_request function
+    PERFORM
+        keyhippo.review_access_request (request_id2, TRUE);
+    -- Verify the request was approved
+    ASSERT EXISTS (
+        SELECT
+            1
+        FROM
+            keyhippo.access_requests
+        WHERE
+            id = request_id2
+            AND status = 'approved'),
+    'Access request should be approved';
+    -- Switch back to user2
+    PERFORM
+        set_config('request.jwt.claims', json_build_object('sub', user2_id, 'role', 'authenticated', 'user_role', 'user')::text, TRUE);
+    -- Test is_granted_access function (should now return true for user2)
+    SELECT
+        keyhippo.is_granted_access ('test_resource', 'write') INTO access_granted;
+    ASSERT access_granted = TRUE,
+    'Access should be granted after approval for user2';
+END
+$$;
 -- Clean up
 ROLLBACK;
