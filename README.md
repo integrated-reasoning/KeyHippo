@@ -166,6 +166,10 @@ CREATE POLICY "user_can_view_own_data" ON "public"."user_data"
   );
 ```
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=integrated-reasoning/KeyHippo&type=Timeline)](https://star-history.com/#integrated-reasoning/KeyHippo&Timeline)
+
 ## Contribution
 
 We welcome community contributions. For guidance, see our Contributing Guide.
