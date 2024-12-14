@@ -8,7 +8,7 @@ Install the KeyHippo extension in your PostgreSQL database:
 
 ```sql
 select dbdev.install('keyhippo@keyhippo');
-create extension "keyhippo@keyhippo" version '1.2.0';
+create extension "keyhippo@keyhippo" version '1.2.1';
 ```
 
 For updates, visit the [KeyHippo extension catalog entry](https://database.dev/keyhippo/keyhippo).
