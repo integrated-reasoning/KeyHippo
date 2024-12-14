@@ -38,6 +38,13 @@ CREATE SCHEMA IF NOT EXISTS keyhippo_rbac;
 -- Create Impersonation schema
 CREATE SCHEMA IF NOT EXISTS keyhippo_impersonation;
 
+-- Ensure required extensions are installed
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE EXTENSION IF NOT EXISTS pg_net;
+
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
 -- Create custom types
 CREATE TYPE keyhippo.app_permission AS ENUM (
     'manage_groups',
