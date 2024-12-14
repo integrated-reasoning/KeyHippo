@@ -1540,6 +1540,37 @@ $$;
 SELECT
     keyhippo.initialize_keyhippo ();
 
+CREATE OR REPLACE FUNCTION keyhippo.check_request ()
+    RETURNS void
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = pg_temp
+    AS $$
+DECLARE
+    ctx record;
+BEGIN
+    IF CURRENT_ROLE <> 'anon' THEN
+        -- If not using the anon role, allow the request to pass
+        RETURN;
+    END IF;
+    -- Check if the provided API key is valid
+    SELECT
+        * INTO ctx
+    FROM
+        keyhippo.current_user_context ();
+    IF ctx.user_id IS NULL THEN
+        -- No valid API key found, raise an error
+        RAISE EXCEPTION 'No registered API key found in x-api-key header.';
+    END IF;
+END;
+$$;
+
+-- Set as pre-request check for PostgREST
+ALTER ROLE authenticator SET pgrst.db_pre_request = 'keyhippo.check_request';
+
+-- Grant necessary permissions for check_request
+GRANT ALL ON FUNCTION keyhippo.check_request () TO authenticated, service_role, anon;
+
 -- Notify PostgREST to reload configuration
 NOTIFY pgrst,
 'reload config';
