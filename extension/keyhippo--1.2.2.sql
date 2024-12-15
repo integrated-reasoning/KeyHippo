@@ -682,15 +682,22 @@ BEGIN
         key_metadata_id = metadata_id;
     computed_hash := encode(extensions.digest(key_part, 'sha512'), 'hex');
     IF computed_hash = stored_key_hash THEN
-        -- Update last_used_at if necessary
-        UPDATE
-            keyhippo.api_key_metadata
-        SET
-            last_used_at = NOW()
-        WHERE
-            id = metadata_id
-            AND (last_used_at IS NULL
-                OR last_used_at < NOW() - INTERVAL '1 minute');
+        -- Check if the transaction is not read-only before performing UPDATE
+        IF current_setting('transaction_read_only', TRUE) = 'off' THEN
+            -- Update last_used_at if necessary
+            UPDATE
+                keyhippo.api_key_metadata
+            SET
+                last_used_at = NOW()
+            WHERE
+                id = metadata_id
+                AND (last_used_at IS NULL
+                    OR last_used_at < NOW() - INTERVAL '1 minute');
+            RAISE LOG 'verify_api_key() - Updated last_used_at for api_key_metadata_id: %', metadata_id;
+        ELSE
+            -- Log that the UPDATE was skipped due to read-only transaction
+            RAISE LOG 'verify_api_key() - Skipping last_used_at update for api_key_metadata_id: % due to read-only transaction.', metadata_id;
+        END IF;
         -- Return user_id, scope_id, and permissions
         RETURN QUERY
         SELECT
