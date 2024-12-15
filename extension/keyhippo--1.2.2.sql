@@ -1050,8 +1050,38 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION keyhippo_impersonation.get_and_cleanup_impersonation ()
+    RETURNS text
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = keyhippo_impersonation
+    AS $$
+DECLARE
+    v_original_role text;
+BEGIN
+    -- Get the original role
+    SELECT
+        original_role::text INTO v_original_role
+    FROM
+        impersonation_state
+    WHERE
+        original_role = 'postgres'
+    ORDER BY
+        impersonation_time DESC
+    LIMIT 1;
+    IF v_original_role IS NULL THEN
+        RAISE EXCEPTION 'Current user is not being impersonated';
+    END IF;
+    -- Clean up state
+    DELETE FROM impersonation_state
+    WHERE original_role = 'postgres';
+    RETURN v_original_role;
+END;
+$$;
+
 CREATE OR REPLACE PROCEDURE keyhippo_impersonation.logout ()
 LANGUAGE plpgsql
+SECURITY INVOKER
 AS $$
 DECLARE
     v_original_role text;
@@ -1059,15 +1089,9 @@ BEGIN
     IF current_setting('session.impersonation_expires', TRUE) IS NULL THEN
         RAISE EXCEPTION 'Not in an impersonation session';
     END IF;
-    SELECT
-        original_role::text INTO v_original_role
-    FROM
-        keyhippo_impersonation.impersonation_state
-    WHERE
-        impersonated_user_id = '00000000-0000-0000-0000-000000000000'::uuid;
-    IF v_original_role IS NULL THEN
-        RAISE EXCEPTION 'Current user is not being impersonated';
-    END IF;
+    -- Get original role and cleanup state
+    v_original_role := keyhippo_impersonation.get_and_cleanup_impersonation ();
+    -- Clear JWT claims
     PERFORM
         set_config('request.jwt.claim.sub', '', TRUE);
     PERFORM
@@ -1076,9 +1100,9 @@ BEGIN
         set_config('request.jwt.claim.email', '', TRUE);
     PERFORM
         set_config('request.jwt.claims', '', TRUE);
+    -- Reset role
     EXECUTE FORMAT('SET ROLE %I', v_original_role);
-    DELETE FROM keyhippo_impersonation.impersonation_state
-    WHERE impersonated_user_id = '00000000-0000-0000-0000-000000000000'::uuid;
+    -- Clear session
     PERFORM
         set_config('session.impersonation_expires', '', TRUE);
     RAISE NOTICE 'Logout successful. Original role: %', v_original_role;
@@ -1291,6 +1315,8 @@ GRANT ALL ON TABLE keyhippo_impersonation.impersonation_state TO postgres;
 GRANT EXECUTE ON PROCEDURE keyhippo_impersonation.login_as_user (UUID) TO postgres;
 
 GRANT EXECUTE ON PROCEDURE keyhippo_impersonation.login_as_anon () TO postgres;
+
+GRANT EXECUTE ON FUNCTION keyhippo_impersonation.get_and_cleanup_impersonation () TO authenticated, anon;
 
 GRANT EXECUTE ON PROCEDURE keyhippo_impersonation.logout () TO authenticated, anon;
 
