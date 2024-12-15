@@ -724,7 +724,10 @@ CREATE OR REPLACE FUNCTION keyhippo.current_user_context ()
         scope_id uuid,
         permissions text[])
     LANGUAGE plpgsql
-    SECURITY INVOKER
+    SECURITY DEFINER
+    SET search_path = keyhippo_impersonation,
+    keyhippo_rbac,
+    keyhippo
     AS $$
 DECLARE
     api_key text;
@@ -732,6 +735,7 @@ DECLARE
     v_scope_id uuid;
     v_permissions text[];
 BEGIN
+    -- First try API key authentication
     api_key := current_setting('request.headers', TRUE)::json ->> 'x-api-key';
     IF api_key IS NOT NULL THEN
         SELECT
@@ -751,23 +755,36 @@ BEGIN
             RETURN;
         END IF;
     END IF;
+    -- Then try auth.uid()
     v_user_id := auth.uid ();
+    -- If that fails, check for impersonation
     IF v_user_id IS NULL THEN
-        RETURN;
+        SELECT
+            impersonated_user_id INTO v_user_id
+        FROM
+            impersonation_state
+        WHERE
+            original_role = 'postgres'
+        ORDER BY
+            impersonation_time DESC
+        LIMIT 1;
     END IF;
-    SELECT
-        ARRAY_AGG(DISTINCT p.name::text) INTO v_permissions
-    FROM
-        keyhippo_rbac.user_group_roles ugr
-        JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-        JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-    WHERE
-        ugr.user_id = v_user_id;
-    RETURN QUERY
-    SELECT
-        v_user_id,
-        NULL::uuid,
-        COALESCE(v_permissions, ARRAY[]::text[]);
+    -- If we have a user_id through any method, get their permissions
+    IF v_user_id IS NOT NULL THEN
+        SELECT
+            ARRAY_AGG(DISTINCT p.name::text) INTO v_permissions
+        FROM
+            keyhippo_rbac.user_group_roles ugr
+            JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
+            JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
+        WHERE
+            ugr.user_id = v_user_id;
+        RETURN QUERY
+        SELECT
+            v_user_id,
+            NULL::uuid,
+            COALESCE(v_permissions, ARRAY[]::text[]);
+    END IF;
 END;
 $$;
 
