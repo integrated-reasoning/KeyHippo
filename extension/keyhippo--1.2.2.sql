@@ -588,7 +588,10 @@ DECLARE
     scope_id uuid;
 BEGIN
     -- Get the authenticated user ID
-    authenticated_user_id := auth.uid ();
+    SELECT
+        user_id INTO authenticated_user_id
+    FROM
+        keyhippo.current_user_context ();
     -- Check if the user is authenticated
     IF authenticated_user_id IS NULL THEN
         RAISE EXCEPTION 'Unauthorized: User not authenticated';
