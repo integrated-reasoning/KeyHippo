@@ -126,7 +126,8 @@ CREATE TABLE keyhippo.api_key_metadata (
     created_at timestamptz NOT NULL DEFAULT now(),
     last_used_at timestamptz,
     expires_at timestamptz NOT NULL DEFAULT (now() + interval '100 years'),
-    is_revoked boolean NOT NULL DEFAULT FALSE
+    is_revoked boolean NOT NULL DEFAULT FALSE,
+    claims jsonb DEFAULT '{}' ::jsonb
 );
 
 CREATE TABLE keyhippo.api_key_secrets (
@@ -1191,6 +1192,70 @@ LANGUAGE plpgsql
 VOLATILE
 SECURITY DEFINER;
 
+-- Function to update claims
+CREATE OR REPLACE FUNCTION keyhippo.update_key_claims (key_id uuid, new_claims jsonb)
+    RETURNS void
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    AS $$
+DECLARE
+    c_user_id uuid;
+    c_scope_id uuid;
+BEGIN
+    -- Get current user context
+    SELECT
+        user_id,
+        scope_id INTO c_user_id,
+        c_scope_id
+    FROM
+        keyhippo.current_user_context ();
+    IF c_user_id IS NULL THEN
+        RAISE EXCEPTION 'Unauthorized';
+    END IF;
+    -- Update claims if user has permission
+    UPDATE
+        keyhippo.api_key_metadata
+    SET
+        claims = new_claims
+    WHERE
+        id = key_id
+        AND ((user_id = c_user_id
+                AND scope_id IS NULL)
+            OR (scope_id = c_scope_id));
+END;
+$$;
+
+-- Function to get key_data
+CREATE OR REPLACE FUNCTION keyhippo.key_data ()
+    RETURNS jsonb
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = public, private, keyhippo
+    AS $$
+DECLARE
+    api_key text;
+    key_metadata jsonb;
+BEGIN
+    -- Get API key from request header
+    api_key := current_setting('request.headers', TRUE)::json ->> 'x-api-key';
+    -- If no API key, return null
+    IF api_key IS NULL THEN
+        RETURN NULL;
+    END IF;
+    -- Get key metadata including claims
+    SELECT
+        jsonb_build_object('id', akm.id, 'description', akm.description, 'claims', akm.claims) INTO key_metadata
+    FROM
+        keyhippo.api_key_metadata akm
+    WHERE
+        akm.prefix =
+    LEFT (api_key, LENGTH(api_key) - 128)
+        AND NOT akm.is_revoked
+        AND akm.expires_at > NOW();
+    RETURN key_metadata;
+END;
+$$;
+
 -- RLS Policies
 ALTER TABLE keyhippo_internal.config ENABLE ROW LEVEL SECURITY;
 
@@ -1296,6 +1361,10 @@ GRANT EXECUTE ON FUNCTION keyhippo_rbac.create_role (text, text, uuid, keyhippo.
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_role_to_user (uuid, uuid, uuid) TO authenticated;
 
 GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_permission_to_role (uuid, keyhippo.app_permission) TO authenticated;
+
+GRANT EXECUTE ON FUNCTION keyhippo.key_data () TO authenticated, authenticator, anon;
+
+GRANT EXECUTE ON FUNCTION keyhippo.update_key_claims (uuid, jsonb) TO authenticated;
 
 -- Grant SELECT, INSERT, UPDATE, DELETE on tables
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo TO authenticated;
