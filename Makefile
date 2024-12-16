@@ -18,6 +18,7 @@ help:
 	@echo "  setup-supabase - Set up Supabase for testing"
 	@echo "  test        - Run tests"
 	@echo "  pg_tap      - Run pg_tap tests"
+	@echo "  cleanup     - Remove files created during testing"
 
 # Reset database
 .PHONY: reset-database
@@ -77,7 +78,15 @@ benchmark:
 	@echo "Running benchmark..."
 	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/bench.sql
 
+# Clean up files created during testing
+.PHONY: cleanup
+cleanup:
+	@echo "Cleaning up test files..."
+	@rm -f create_schema.sql create_test_accounts.sql
+	@rm -f $(TEST_DIR)/.env.test
+	@rm -rf $(TEST_DIR)/supabase
+
 # Run tests with coverage (including Supabase setup and migrations)
 .PHONY: test
-test: setup-supabase apply-integration-test-migrations pg_tap
+test: setup-supabase apply-integration-test-migrations pg_tap cleanup
 	@echo "Running tests..."
