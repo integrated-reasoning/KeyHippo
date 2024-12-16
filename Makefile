@@ -19,6 +19,12 @@ help:
 	@echo "  test        - Run tests"
 	@echo "  pg_tap      - Run pg_tap tests"
 
+# Reset database
+.PHONY: reset-database
+reset-database:
+	@echo "Resetting..."
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/reset.sql
+
 # Set up Supabase
 .PHONY: setup-supabase
 setup-supabase:
