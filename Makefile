@@ -1,12 +1,14 @@
 # Directory paths
-SRC_DIR := src
-TEST_DIR := tests
-BUILD_DIR := dist
+SQL_DIR := sql
+TEST_DIR := test
 PG_HOST := localhost
 PG_PORT := 54322
 PG_USER := postgres
 PG_DB := postgres
 PG_PASSWORD := postgres
+
+EXTENSION := keyhippo
+EXTVERSION := 1.2.4
 
 # Default goal
 .DEFAULT_GOAL := help
@@ -19,18 +21,19 @@ help:
 	@echo "  test        - Run tests"
 	@echo "  pg_tap      - Run pg_tap tests"
 	@echo "  cleanup     - Remove files created during testing"
+	@echo "  benchmark   - Run benchmark tests"
 
 # Reset database
 .PHONY: reset-database
 reset-database:
 	@echo "Resetting..."
-	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/reset.sql
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/utils/reset.sql
 
 # Set up Supabase
 .PHONY: setup-supabase
 setup-supabase:
 	@echo "Setting up Supabase..."
-	@cd tests && \
+	@cd $(TEST_DIR) && \
 		supabase start && \
 		eval $$(supabase status -o env) && \
 		echo "SUPABASE_URL=$$API_URL" > .env.test && \
@@ -40,10 +43,15 @@ setup-supabase:
 	@echo "CREATE EXTENSION IF NOT EXISTS pgjwt;" >> create_schema.sql
 	@echo "CREATE SCHEMA IF NOT EXISTS keyhippo;" >> create_schema.sql
 	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f create_schema.sql
-	@for file in $$(find extension/ -type f -name "keyhippo*--*.sql" | sort -V); do \
-		echo "Applying migration: $$file" ; \
-		PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f "$$file"; \
-	done
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(SQL_DIR)/$(EXTENSION).sql
+	@if ls $(SQL_DIR)/$(EXTENSION)--*--*.sql 1> /dev/null 2>&1; then \
+		for file in $(SQL_DIR)/$(EXTENSION)--*--*.sql; do \
+			echo "Applying migration: $$file" ; \
+			PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f "$$file"; \
+		done \
+	else \
+		echo "No upgrade migrations found. Skipping."; \
+	fi
 
 # Apply integration test migrations
 .PHONY: apply-integration-test-migrations
@@ -76,7 +84,7 @@ pg_tap:
 .PHONY: benchmark
 benchmark:
 	@echo "Running benchmark..."
-	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/bench.sql
+	PGPASSWORD=$(PG_PASSWORD) psql -h $(PG_HOST) -p $(PG_PORT) -U $(PG_USER) -d $(PG_DB) -v ON_ERROR_STOP=1 -f $(TEST_DIR)/utils/bench.sql
 
 # Clean up files created during testing
 .PHONY: cleanup
