@@ -1,150 +1,228 @@
 # check_request
 
-PreRequest check function for PostgREST that validates API key authentication.
+Validate an incoming API request against security rules.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo.check_request()
-RETURNS void
+keyhippo.check_request(
+    request_data jsonb,
+    options jsonb DEFAULT NULL
+) RETURNS boolean
 ```
 
-## Security
+## Description
 
-- SECURITY DEFINER function
-- Used as pgrst.db_pre_request
-- Enforces API key validation
-- Prevents unauthorized access
+`check_request` performs security checks on API requests:
+1. Validates API key if present
+2. Checks rate limits
+3. Validates request format
+4. Logs request metadata
+5. Updates usage statistics
 
-## Example Usage
+## Parameters
 
-### Enable PreRequest Check
-```sql
--- Enable for PostgREST
-ALTER ROLE authenticator 
-SET pgrst.db_pre_request = 'keyhippo.check_request';
+| Name | Type | Description |
+|------|------|-------------|
+| request_data | jsonb | Request details |
+| options | jsonb | Check options |
 
--- Reload configuration
-NOTIFY pgrst, 'reload config';
-```
+## Request Data Format
 
-### Test Configuration
-```sql
-DO $$
-BEGIN
-    -- Should raise exception with no API key
-    PERFORM keyhippo.check_request();
-EXCEPTION
-    WHEN OTHERS THEN
-        ASSERT SQLERRM = 'No registered API key found in x-api-key header.';
-END $$;
-```
-
-## Implementation Notes
-
-1. **Request Validation**
-```sql
--- Skip check for authenticated users
-IF CURRENT_ROLE <> 'anon' THEN
-    RETURN;
-END IF;
-
--- Check API key
-SELECT * INTO ctx
-FROM keyhippo.current_user_context();
-
-IF ctx.user_id IS NULL THEN
-    RAISE EXCEPTION 'No registered API key found in x-api-key header.';
-END IF;
-```
-
-2. **Security Context**
-```sql
--- Sets pg_temp search path
-SET search_path = pg_temp
-```
-
-## Error Handling
-
-1. **No API Key**
-```sql
--- Raises exception
-'No registered API key found in x-api-key header.'
-```
-
-2. **Invalid Key**
-```sql
--- Raises exception
-'No registered API key found in x-api-key header.'
-```
-
-3. **Role Check**
-```sql
--- Allows authenticated users
--- Checks anon requests
-IF CURRENT_ROLE <> 'anon' THEN
-    RETURN;
-END IF;
-```
-
-## Security Considerations
-
-1. **API Key Validation**
-   - Checks key presence
-   - Validates key format
-   - Verifies key status
-
-2. **Role Management**
-   - Handles authenticated users
-   - Validates anonymous access
-   - Maintains security context
-
-3. **Error Handling**
-   - Clear error messages
-   - No sensitive data exposure
-   - Consistent behavior
-
-## Performance Impact
-
-- Fast key validation
-- Caches results
-- Minimal overhead
-- Required for security
-
-## PostgREST Integration
-
-1. **Configuration**
-```sql
--- Set pre-request function
-ALTER ROLE authenticator 
-SET pgrst.db_pre_request = 'keyhippo.check_request';
-
--- Apply changes
-NOTIFY pgrst, 'reload config';
-```
-
-2. **Headers**
-```bash
-# Required header
-x-api-key: your_api_key_here
-```
-
-3. **Error Responses**
+Required fields:
 ```json
 {
-    "code": "PGRST301",
-    "message": "No registered API key found in x-api-key header."
+    "method": "GET|POST|PUT|DELETE",
+    "path": "/api/v1/resource",
+    "headers": {
+        "x-api-key": "prefix.key",
+        "content-type": "application/json"
+    },
+    "client_ip": "10.0.0.1",
+    "timestamp": "2024-01-01T00:00:00Z"
 }
 ```
 
-## Related Functions
+Optional fields:
+```json
+{
+    "body": {"key": "value"},
+    "query": {"filter": "value"},
+    "user_agent": "curl/7.64.1",
+    "request_id": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
 
-- [verify_api_key()](verify_api_key.md)
-- [current_user_context()](current_user_context.md)
-- [authorize()](authorize.md)
+## Examples
+
+Basic check:
+```sql
+SELECT check_request('{
+    "method": "GET",
+    "path": "/api/v1/items",
+    "headers": {
+        "x-api-key": "KH2ABJM1.NBTGK19FH27DJSM4"
+    },
+    "client_ip": "10.0.0.1"
+}');
+```
+
+With options:
+```sql
+SELECT check_request(
+    request_data := '{
+        "method": "POST",
+        "path": "/api/v1/items",
+        "headers": {
+            "x-api-key": "KH2ABJM1.NBTGK19FH27DJSM4"
+        },
+        "body": {
+            "name": "test"
+        }
+    }',
+    options := '{
+        "rate_limit": {
+            "window": "1 minute",
+            "max_requests": 60
+        },
+        "require_body_hash": true
+    }'
+);
+```
+
+Batch check:
+```sql
+INSERT INTO request_log (passed, checked_at)
+SELECT 
+    check_request(request_data) as passed,
+    now() as checked_at
+FROM json_array_elements('[
+    {"method": "GET", "path": "/api/v1/items"},
+    {"method": "POST", "path": "/api/v1/items"}
+]'::json) as request_data;
+```
+
+## Implementation
+
+Request processing:
+```sql
+-- 1. Extract API key
+SELECT verify_api_key(
+    (request_data->'headers'->>'x-api-key')::text
+) INTO key_context;
+
+-- 2. Check rate limit
+SELECT check_rate_limit(
+    (request_data->>'client_ip')::inet,
+    key_context->>'key_id'
+) INTO rate_ok;
+
+-- 3. Validate request format
+SELECT validate_request_format(
+    request_data,
+    (options->>'schema_version')::text
+) INTO format_ok;
+
+-- 4. Log request
+INSERT INTO request_log (
+    request_id,
+    method,
+    path,
+    client_ip,
+    key_id,
+    passed
+) VALUES (
+    coalesce(
+        (request_data->>'request_id')::uuid,
+        gen_random_uuid()
+    ),
+    request_data->>'method',
+    request_data->>'path',
+    (request_data->>'client_ip')::inet,
+    (key_context->>'key_id')::uuid,
+    rate_ok AND format_ok
+);
+
+-- 5. Update statistics
+UPDATE api_key_metadata
+SET 
+    last_used_at = now(),
+    request_count = request_count + 1
+WHERE key_id = (key_context->>'key_id')::uuid;
+```
+
+## Error Cases
+
+Invalid request data:
+```sql
+ERROR:  invalid request data
+DETAIL:  Missing required field "method"
+```
+
+Rate limit exceeded:
+```sql
+ERROR:  rate limit exceeded
+DETAIL:  Max 60 requests per minute
+HINT:   Try again in 35 seconds
+```
+
+Invalid API key:
+```sql
+ERROR:  invalid api key
+DETAIL:  Key "KH2ABJM1.NBTGK19FH27DJSM4" not found or expired
+```
+
+Format validation:
+```sql
+ERROR:  invalid request format
+DETAIL:  Body hash mismatch
+HINT:   Include content-md5 header
+```
+
+## Request Validation Rules
+
+Method validation:
+```sql
+method IN ('GET', 'POST', 'PUT', 'DELETE', 'PATCH')
+```
+
+Path validation:
+```sql
+path ~ '^/api/v[0-9]+/[a-z0-9_/-]+$'
+```
+
+Header requirements:
+```sql
+headers ? 'x-api-key'
+headers ? 'content-type' WHEN method IN ('POST', 'PUT', 'PATCH')
+```
+
+IP validation:
+```sql
+client_ip <<= any(allowed_networks)
+client_ip != '0.0.0.0/0'
+```
+
+## Rate Limiting
+
+Default limits:
+```sql
+-- Anonymous requests
+60 per minute per IP
+
+-- Authenticated requests
+1000 per minute per key
+
+-- Burst handling
+{
+    "burst": true,
+    "burst_limit": 5,
+    "burst_period": "1 second"
+}
+```
 
 ## See Also
 
-- [API Key Metadata](../tables/api_key_metadata.md)
-- [Security Policies](../security/rls_policies.md)
-- [Function Security](../security/function_security.md)
+- [verify_api_key()](verify_api_key.md)
+- [request_log table](../tables/request_log.md)
+- [rate_limits table](../tables/rate_limits.md)
