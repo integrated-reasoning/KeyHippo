@@ -1,142 +1,138 @@
 # rotate_api_key
 
-Creates a new API key while revoking an existing one, maintaining the same configuration.
+Replace an API key while maintaining its metadata and permissions.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo.rotate_api_key(old_api_key_id uuid)
-RETURNS TABLE (
+keyhippo.rotate_api_key(
+    key_id uuid,
+    grace_period interval DEFAULT '24 hours'
+) RETURNS TABLE (
     new_api_key text,
-    new_api_key_id uuid
+    new_key_id uuid,
+    old_key_expires_at timestamptz
 )
 ```
 
+## Description
+
+`rotate_api_key` creates a new API key that inherits the settings of an existing key. The old key remains valid for a grace period to allow clients to migrate. After the grace period, the old key is automatically revoked.
+
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| old_api_key_id | uuid | ID of the API key to rotate |
+| Name | Type | Description |
+|------|------|-------------|
+| key_id | uuid | ID of key to rotate |
+| grace_period | interval | Time before old key expires |
 
-## Returns
+## Return Value
 
-| Column | Type | Description |
-|--------|------|-------------|
-| new_api_key | text | Complete new API key (only shown once) |
-| new_api_key_id | uuid | ID of the new API key |
-
-## Security
-
-- SECURITY DEFINER function
-- Only key owner or scope admin can rotate
-- Maintains existing permissions and claims
-- Atomic operation for security
-
-## Example Usage
-
-### Basic Rotation
+Returns a table with:
 ```sql
-SELECT * FROM keyhippo.rotate_api_key('old_key_id_here');
+   new_api_key     | Format: prefix.key
+   new_key_id      | UUID of new key
+   old_key_expires | Timestamp when old key expires
 ```
 
-### Scheduled Rotation
+## Examples
+
+Basic rotation:
 ```sql
-CREATE OR REPLACE PROCEDURE rotate_old_keys()
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    key_record RECORD;
-BEGIN
-    FOR key_record IN 
-        SELECT id 
-        FROM keyhippo.api_key_metadata 
-        WHERE created_at < NOW() - INTERVAL '90 days'
-        AND NOT is_revoked
-    LOOP
-        PERFORM keyhippo.rotate_api_key(key_record.id);
-    END LOOP;
-END;
-$$;
+SELECT * FROM rotate_api_key('550e8400-e29b-41d4-a716-446655440000');
 ```
 
-### With Overlap Period
+Rotation with custom grace period:
 ```sql
-DO $$
-DECLARE
-    new_key_record RECORD;
-BEGIN
-    -- Create new key
-    SELECT * INTO new_key_record 
-    FROM keyhippo.rotate_api_key('old_key_id_here');
-    
-    -- Allow time for deployment
-    PERFORM pg_sleep(300);  -- 5 minutes
-    
-    -- Revoke old key
-    PERFORM keyhippo.revoke_api_key('old_key_id_here');
-END $$;
+SELECT * FROM rotate_api_key(
+    '550e8400-e29b-41d4-a716-446655440000',
+    '72 hours'
+);
 ```
 
-## Implementation Notes
-
-1. **Rotation Process**
-   - Creates new key with same config
-   - Copies claims and settings
-   - Revokes old key
-   - Returns new key details
-
-2. **Data Preservation**
+Mass rotation of old keys:
 ```sql
--- Preserved attributes:
-- scope_id
-- claims
-- description
-- user_id
+SELECT key_id, r.new_api_key
+FROM api_key_metadata a
+LEFT JOIN LATERAL rotate_api_key(a.key_id) r ON true
+WHERE a.created_at < now() - interval '90 days'
+AND a.status = 'active';
 ```
 
-3. **Audit Logging**
+## Implementation
+
+1. Begins transaction
+2. Creates new key with create_api_key()
+3. Copies metadata from old key:
 ```sql
--- Rotation events are logged
-- Old key revocation
-- New key creation
-- Relationship between keys
+UPDATE api_key_metadata
+SET scope = old.scope,
+    tenant_id = old.tenant_id,
+    metadata = jsonb_set(
+        old.metadata,
+        '{rotation}',
+        jsonb_build_object(
+            'rotated_from', old.key_id,
+            'rotated_at', now()
+        )
+    )
+FROM api_key_metadata old
+WHERE api_key_metadata.key_id = new_key_id
+AND old.key_id = rotating_key_id;
+```
+4. Sets expiration on old key:
+```sql
+UPDATE api_key_metadata
+SET expires_at = now() + grace_period,
+    metadata = jsonb_set(
+        metadata,
+        '{rotation}',
+        jsonb_build_object(
+            'rotated_to', new_key_id,
+            'rotated_at', now()
+        )
+    )
+WHERE key_id = rotating_key_id;
+```
+5. Commits transaction
+
+## Error Cases
+
+Key not found:
+```sql
+ERROR:  key not found
+DETAIL:  No active key exists with ID 550e8400-e29b-41d4-a716-446655440000
 ```
 
-## Error Handling
-
-1. **Invalid Key ID**
+Already rotated:
 ```sql
--- Raises exception
-SELECT * FROM keyhippo.rotate_api_key('invalid_uuid');
+ERROR:  key already rotated
+DETAIL:  Key was rotated at 2024-01-01 00:00:00+00
+HINT:   New key ID: 67e55044-10b1-426f-9247-bb680e5fe0c8
 ```
 
-2. **Already Revoked**
+Invalid grace period:
 ```sql
--- Raises exception
-SELECT * FROM keyhippo.rotate_api_key('revoked_key_id');
+ERROR:  invalid grace period
+DETAIL:  Grace period must be between 1 hour and 30 days
 ```
 
-3. **Unauthorized**
+## Audit Trail
+
+Rotation creates these audit entries:
 ```sql
--- Raises exception
-SELECT * FROM keyhippo.rotate_api_key('unauthorized_key_id');
+event_type | key_created  | For new key
+event_type | key_rotated  | For old key
 ```
 
-## Performance
-
-- Single database transaction
-- Minimal table operations
-- Efficient key generation
-- Atomic updates
-
-## Related Functions
-
-- [create_api_key()](create_api_key.md)
-- [revoke_api_key()](revoke_api_key.md)
-- [verify_api_key()](verify_api_key.md)
+Each entry includes:
+- Old and new key IDs
+- Rotation timestamp
+- Grace period
+- User who performed rotation
 
 ## See Also
 
-- [API Key Metadata](../tables/api_key_metadata.md)
-- [API Key Secrets](../tables/api_key_secrets.md)
-- [Security Best Practices](../security/rls_policies.md)
+- [create_api_key()](create_api_key.md) - Key creation
+- [revoke_api_key()](revoke_api_key.md) - Key revocation
+- [verify_api_key()](verify_api_key.md) - Key validation

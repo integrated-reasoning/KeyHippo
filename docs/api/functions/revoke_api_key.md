@@ -1,114 +1,124 @@
 # revoke_api_key
 
-Revokes an API key, preventing any further use.
+Invalidate an API key.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo.revoke_api_key(api_key_id uuid)
-RETURNS boolean
+keyhippo.revoke_api_key(
+    key_id uuid,
+    reason text DEFAULT NULL
+) RETURNS void
 ```
+
+## Description
+
+`revoke_api_key` immediately invalidates an API key by:
+1. Setting status to 'revoked' in api_key_metadata
+2. Recording revocation reason and timestamp
+3. Logging revocation in audit_log
+4. Invalidating any cached verifications
 
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| api_key_id | uuid | ID of the API key to revoke |
+| Name | Type | Description |
+|------|------|-------------|
+| key_id | uuid | ID of key to revoke |
+| reason | text | Optional reason for audit log |
 
-## Returns
+## Examples
 
-Returns `true` if the key was successfully revoked, `false` if the key was already revoked or not found.
-
-## Security
-
-- SECURITY DEFINER function
-- Only key owner or users with manage_api_keys permission can revoke
-- Automatically removes key hash for security
-- Action is logged to audit system
-
-## Example Usage
-
-### Basic Revocation
+Revoke with reason:
 ```sql
-SELECT keyhippo.revoke_api_key('key_id_here');
+SELECT revoke_api_key(
+    '550e8400-e29b-41d4-a716-446655440000'::uuid,
+    'Security incident #1234'
+);
 ```
 
-### With Error Handling
+Revoke by key prefix:
 ```sql
-DO $$
-BEGIN
-    IF NOT keyhippo.revoke_api_key('key_id_here') THEN
-        RAISE EXCEPTION 'Failed to revoke key';
-    END IF;
-END $$;
+SELECT revoke_api_key(key_id, 'Rotating old keys')
+FROM api_key_metadata
+WHERE key_prefix = 'KH2ABJM1';
 ```
 
-### Bulk Revocation
+Revoke all keys for user:
 ```sql
--- Revoke all expired keys
-DO $$
-DECLARE
-    key_record RECORD;
-BEGIN
-    FOR key_record IN 
-        SELECT id 
-        FROM keyhippo.api_key_metadata 
-        WHERE expires_at < NOW()
-    LOOP
-        PERFORM keyhippo.revoke_api_key(key_record.id);
-    END LOOP;
-END $$;
+SELECT revoke_api_key(key_id, 'User offboarding')
+FROM api_key_metadata
+WHERE user_id = '67e55044-10b1-426f-9247-bb680e5fe0c8'
+AND status = 'active';
+```
+
+## Error Cases
+
+Key not found:
+```sql
+SELECT revoke_api_key('550e8400-e29b-41d4-a716-446655440000');
+ERROR:  key not found
+DETAIL:  No active key exists with ID 550e8400-e29b-41d4-a716-446655440000
+```
+
+Already revoked:
+```sql
+SELECT revoke_api_key('550e8400-e29b-41d4-a716-446655440000');
+ERROR:  key already revoked
+DETAIL:  Key was revoked at 2024-01-01 00:00:00+00
+```
+
+Permission denied:
+```sql
+SELECT revoke_api_key('550e8400-e29b-41d4-a716-446655440000');
+ERROR:  permission denied for key
+DETAIL:  Current user cannot revoke keys owned by other users
 ```
 
 ## Implementation Notes
 
-1. **Revocation Process**
-   - Marks key as revoked in metadata
-   - Deletes key hash from secrets
-   - Records action in audit log
-   - Immediate effect
-
-2. **Authorization Checks**
-   ```sql
-   -- Checks performed:
-   user_id = c_user_id  -- Key owner
-   OR
-   scope_id = c_scope_id  -- Scope admin
-   ```
-
-3. **Cleanup Actions**
-   - Removes key hash
-   - Updates last_used_at
-   - Logs revocation
-
-## Error Handling
-
-1. **Invalid Key ID**
+Function executes:
 ```sql
--- Returns false
-SELECT keyhippo.revoke_api_key('invalid_uuid_here');
+UPDATE api_key_metadata
+SET status = 'revoked',
+    metadata = jsonb_set(
+        metadata,
+        '{revocation}',
+        jsonb_build_object(
+            'reason', $2,
+            'timestamp', now(),
+            'revoked_by', (current_user_context()->>'user_id')::uuid
+        )
+    )
+WHERE key_id = $1
+AND status = 'active'
+RETURNING key_id;
 ```
 
-2. **Already Revoked**
+Followed by audit log entry:
 ```sql
--- Returns false
-SELECT keyhippo.revoke_api_key('already_revoked_key_id');
+INSERT INTO audit_log (
+    event_type,
+    event_data,
+    key_id
+) VALUES (
+    'key_revoked',
+    jsonb_build_object(
+        'reason', $2,
+        'key_prefix', (SELECT key_prefix FROM api_key_metadata WHERE key_id = $1)
+    ),
+    $1
+);
 ```
 
-3. **Unauthorized**
-```sql
--- Raises exception
-SELECT keyhippo.revoke_api_key('someone_elses_key_id');
-```
+## Permissions Required
 
-## Related Functions
-
-- [create_api_key()](create_api_key.md)
-- [verify_api_key()](verify_api_key.md)
-- [rotate_api_key()](rotate_api_key.md)
+User must either:
+- Own the key being revoked
+- Have the 'revoke_any_key' permission
+- Be a system administrator
 
 ## See Also
 
-- [API Key Metadata](../tables/api_key_metadata.md)
-- [API Key Secrets](../tables/api_key_secrets.md)
-- [Audit Log](../tables/audit_log.md)
+- [rotate_api_key()](rotate_api_key.md) - Replace key
+- [verify_api_key()](verify_api_key.md) - Check key status
+- [api_key_metadata](../tables/api_key_metadata.md) - Key storage

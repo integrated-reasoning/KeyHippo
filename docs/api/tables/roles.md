@@ -1,175 +1,145 @@
 # roles
 
-Defines roles that can be assigned to users within groups.
+Defines available roles for role-based access control.
 
-## Schema
+## Table Definition
 
 ```sql
 CREATE TABLE keyhippo_rbac.roles (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    role_id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name text NOT NULL,
+    tenant_id uuid,
     description text,
-    group_id uuid NOT NULL REFERENCES keyhippo_rbac.groups(id) ON DELETE CASCADE,
-    role_type keyhippo.app_role NOT NULL DEFAULT 'user',
-    UNIQUE (name, group_id)
+    metadata jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT valid_role_name CHECK (name ~ '^[a-z][a-z0-9_]{2,62}[a-z0-9]$'),
+    CONSTRAINT unique_role_name UNIQUE (name, tenant_id)
 );
+```
+
+## Indexes
+
+```sql
+-- Role lookup by name
+CREATE UNIQUE INDEX idx_role_name 
+ON roles(name) 
+WHERE tenant_id IS NULL;
+
+-- Tenant role lookup
+CREATE UNIQUE INDEX idx_tenant_role_name 
+ON roles(tenant_id, name) 
+WHERE tenant_id IS NOT NULL;
+
+-- Update timestamp maintenance
+CREATE INDEX idx_role_updated 
+ON roles(updated_at);
 ```
 
 ## Columns
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | uuid | Primary key |
-| name | text | Role name (unique per group) |
-| description | text | Optional description |
-| group_id | uuid | Group this role belongs to |
-| role_type | keyhippo.app_role | Either 'admin' or 'user' |
+| Name | Type | Description |
+|------|------|-------------|
+| role_id | uuid | Primary key |
+| name | text | Role identifier (lowercase, underscores) |
+| tenant_id | uuid | Optional tenant association |
+| description | text | Role purpose and scope |
+| metadata | jsonb | Additional role data |
+| created_at | timestamptz | Creation timestamp |
+| updated_at | timestamptz | Last modified timestamp |
 
-## Indexes
+## Default Roles
 
-- Primary Key on `id`
-- Unique index on `(name, group_id)`
-- Index on `group_id`
-
-## Security
-
-- RLS enabled
-- Requires manage_roles permission
-- Audit logged
-- Referenced by permissions
-
-## Example Usage
-
-### Create Role
+System creates these roles on initialization:
 ```sql
-INSERT INTO keyhippo_rbac.roles (
-    name,
-    description,
-    group_id,
-    role_type
+INSERT INTO roles (name, description) VALUES
+('admin', 'Full system access'),
+('user', 'Standard user access'),
+('readonly', 'Read-only access to resources'),
+('service', 'API service account access');
+```
+
+## Example Queries
+
+List all roles:
+```sql
+SELECT name, description, 
+       count(p.permission_id) as permission_count
+FROM roles r
+LEFT JOIN role_permissions p ON p.role_id = r.role_id
+WHERE tenant_id IS NULL
+GROUP BY r.role_id
+ORDER BY name;
+```
+
+Find roles by permission:
+```sql
+SELECT r.name, r.description
+FROM roles r
+JOIN role_permissions rp ON rp.role_id = r.role_id
+JOIN permissions p ON p.permission_id = rp.permission_id
+WHERE p.name = 'create_api_key'
+AND (r.tenant_id = current_tenant() OR r.tenant_id IS NULL);
+```
+
+Role hierarchy:
+```sql
+WITH RECURSIVE role_tree AS (
+    SELECT role_id, name, 0 as level
+    FROM roles
+    WHERE name = 'admin'
+    
+    UNION ALL
+    
+    SELECT r.role_id, r.name, rt.level + 1
+    FROM roles r
+    JOIN role_inheritance ri ON ri.child_role_id = r.role_id
+    JOIN role_tree rt ON rt.role_id = ri.parent_role_id
+    WHERE rt.level < 5
 )
-VALUES (
-    'Senior Engineer',
-    'Senior engineering position',
-    'group_id_here',
-    'user'
-);
+SELECT LPAD('', level * 2, ' ') || name as role
+FROM role_tree
+ORDER BY level, name;
 ```
 
-### Complete Role Setup
+## Triggers
+
 ```sql
-DO $$
-DECLARE
-    group_id uuid;
-    admin_role_id uuid;
-    user_role_id uuid;
-BEGIN
-    -- Create group
-    INSERT INTO keyhippo_rbac.groups (name, description)
-    VALUES ('Engineering', 'Engineering team')
-    RETURNING id INTO group_id;
-    
-    -- Create admin role
-    INSERT INTO keyhippo_rbac.roles (
-        name, description, group_id, role_type
-    )
-    VALUES (
-        'Engineering Lead',
-        'Team leadership role',
-        group_id,
-        'admin'
-    )
-    RETURNING id INTO admin_role_id;
-    
-    -- Create user role
-    INSERT INTO keyhippo_rbac.roles (
-        name, description, group_id, role_type
-    )
-    VALUES (
-        'Engineer',
-        'Team member role',
-        group_id,
-        'user'
-    )
-    RETURNING id INTO user_role_id;
-    
-    -- Assign permissions
-    INSERT INTO keyhippo_rbac.role_permissions (role_id, permission_id)
-    SELECT admin_role_id, id
-    FROM keyhippo_rbac.permissions
-    WHERE name IN ('manage_team', 'manage_code');
-END $$;
+-- Maintain updated_at
+CREATE TRIGGER update_role_timestamp
+    BEFORE UPDATE ON roles
+    FOR EACH ROW
+    EXECUTE FUNCTION update_timestamp();
+
+-- Audit role changes
+CREATE TRIGGER audit_role_changes
+    AFTER INSERT OR UPDATE OR DELETE ON roles
+    FOR EACH ROW
+    EXECUTE FUNCTION audit_role_change();
 ```
 
-### Query Role Structure
-```sql
-SELECT 
-    r.name as role_name,
-    r.role_type,
-    g.name as group_name,
-    array_agg(p.name) as permissions
-FROM keyhippo_rbac.roles r
-JOIN keyhippo_rbac.groups g ON r.group_id = g.id
-LEFT JOIN keyhippo_rbac.role_permissions rp ON r.id = rp.role_id
-LEFT JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-GROUP BY r.id, r.name, r.role_type, g.name;
-```
+## RLS Policies
 
-## Implementation Notes
-
-1. **Access Control**
 ```sql
--- RLS policy
-CREATE POLICY roles_access_policy ON keyhippo_rbac.roles
+-- Tenant isolation
+CREATE POLICY tenant_roles ON roles
     FOR ALL
-    TO authenticated
-    USING (keyhippo.authorize('manage_roles'))
-    WITH CHECK (keyhippo.authorize('manage_roles'));
+    USING (
+        tenant_id IS NULL OR
+        tenant_id = current_tenant()
+    );
+
+-- Role management permissions
+CREATE POLICY manage_roles ON roles
+    FOR ALL
+    USING (
+        has_permission('manage_roles')
+    );
 ```
-
-2. **Role Types**
-```sql
-CREATE TYPE keyhippo.app_role AS ENUM (
-    'admin',
-    'user'
-);
-```
-
-3. **Cascading Deletes**
-```sql
--- When group is deleted:
-ON DELETE CASCADE
-```
-
-## Common Patterns
-
-1. **Engineering Roles**
-```sql
-INSERT INTO keyhippo_rbac.roles (name, description, group_id, role_type)
-VALUES
-    ('Engineering Lead', 'Team leadership', group_id, 'admin'),
-    ('Senior Engineer', 'Senior position', group_id, 'user'),
-    ('Engineer', 'Standard position', group_id, 'user'),
-    ('Junior Engineer', 'Entry level', group_id, 'user');
-```
-
-2. **Product Roles**
-```sql
-INSERT INTO keyhippo_rbac.roles (name, description, group_id, role_type)
-VALUES
-    ('Product Manager', 'Product leadership', group_id, 'admin'),
-    ('Product Owner', 'Product ownership', group_id, 'user'),
-    ('Product Analyst', 'Analysis role', group_id, 'user');
-```
-
-## Related Tables
-
-- [groups](groups.md)
-- [role_permissions](role_permissions.md)
-- [user_group_roles](user_group_roles.md)
 
 ## See Also
 
-- [create_role()](../functions/create_role.md)
-- [assign_role_to_user()](../functions/assign_role_to_user.md)
-- [RBAC Security](../security/rls_policies.md)
+- [role_permissions](role_permissions.md) - Role permission assignments
+- [user_group_roles](user_group_roles.md) - User role assignments
+- [create_role()](../functions/create_role.md) - Role creation
+- [assign_role_to_user()](../functions/assign_role_to_user.md) - Role assignment
