@@ -1,181 +1,181 @@
 # assign_permission_to_role
 
-Assigns a permission to a role.
+Grant a permission to a role.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo_rbac.assign_permission_to_role(
-    p_role_id uuid,
-    p_permission_name keyhippo.app_permission
-)
-RETURNS void
+keyhippo.assign_permission_to_role(
+    permission_name text,
+    role_name text,
+    conditions jsonb DEFAULT NULL
+) RETURNS void
 ```
+
+## Description
+
+`assign_permission_to_role` creates a permission grant by:
+1. Looking up permission and role IDs
+2. Creating role-permission mapping
+3. Setting optional grant conditions
+4. Recording assignment in audit log
 
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| p_role_id | uuid | Role to assign permission to |
-| p_permission_name | keyhippo.app_permission | Permission to assign |
+| Name | Type | Description |
+|------|------|-------------|
+| permission_name | text | Name of permission |
+| role_name | text | Name of target role |
+| conditions | jsonb | Optional grant conditions |
 
-## Security
+## Examples
 
-- SECURITY INVOKER function
-- Requires manage_roles permission
-- Audit logged
-- Transaction safe
-
-## Example Usage
-
-### Basic Assignment
+Basic grant:
 ```sql
-SELECT keyhippo_rbac.assign_permission_to_role(
-    'role_id_here',
-    'manage_resources'
+SELECT assign_permission_to_role(
+    'read_data',
+    'analyst'
 );
 ```
 
-### Multiple Permissions
+Conditional grant:
 ```sql
-DO $$
-DECLARE
-    role_id uuid;
-BEGIN
-    -- Get role ID
-    SELECT id INTO role_id
-    FROM keyhippo_rbac.roles
-    WHERE name = 'Admin Role';
-    
-    -- Assign permissions
-    PERFORM keyhippo_rbac.assign_permission_to_role(
-        role_id,
-        'manage_users'
-    );
-    
-    PERFORM keyhippo_rbac.assign_permission_to_role(
-        role_id,
-        'manage_resources'
-    );
-    
-    PERFORM keyhippo_rbac.assign_permission_to_role(
-        role_id,
-        'view_analytics'
-    );
-END $$;
+SELECT assign_permission_to_role(
+    'modify_data',
+    'analyst',
+    '{"time_window": {"start": "09:00", "end": "17:00"}}'
+);
 ```
 
-### Role Setup with Permissions
+Resource-specific grant:
 ```sql
-CREATE OR REPLACE FUNCTION setup_role_with_permissions(
-    role_name text,
-    group_id uuid,
-    permissions keyhippo.app_permission[]
-)
-RETURNS uuid
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_role_id uuid;
-BEGIN
-    -- Create role
-    SELECT keyhippo_rbac.create_role(
-        role_name,
-        'Role with assigned permissions',
-        group_id,
-        'user'
-    ) INTO v_role_id;
-    
-    -- Assign permissions
-    FOR i IN array_lower(permissions, 1)..array_upper(permissions, 1)
-    LOOP
-        PERFORM keyhippo_rbac.assign_permission_to_role(
-            v_role_id,
-            permissions[i]
-        );
-    END LOOP;
-    
-    RETURN v_role_id;
-END;
-$$;
+SELECT assign_permission_to_role(
+    'manage_keys',
+    'key_admin',
+    '{"max_keys": 100, "key_types": ["api", "service"]}'
+);
 ```
 
-## Implementation Notes
+## Implementation
 
-1. **Permission Assignment**
+Permission assignment SQL:
 ```sql
 INSERT INTO keyhippo_rbac.role_permissions (
     role_id,
-    permission_id
+    permission_id,
+    conditions,
+    granted_at
 )
 SELECT 
-    p_role_id,
-    id
-FROM keyhippo_rbac.permissions
-WHERE name = p_permission_name
-ON CONFLICT (role_id, permission_id) DO NOTHING;
+    r.role_id,
+    p.permission_id,
+    $3,
+    now()
+FROM keyhippo_rbac.roles r
+JOIN keyhippo_rbac.permissions p ON true
+WHERE r.name = $2
+AND p.name = $1
+ON CONFLICT (role_id, permission_id) 
+DO UPDATE SET 
+    conditions = $3,
+    granted_at = now();
 ```
 
-2. **Constraints**
-```sql
--- Unique assignment
-UNIQUE (role_id, permission_id)
+## Error Cases
 
--- Foreign keys
-REFERENCES keyhippo_rbac.roles(id)
-REFERENCES keyhippo_rbac.permissions(id)
+Permission not found:
+```sql
+SELECT assign_permission_to_role('invalid', 'analyst');
+ERROR:  permission not found
+DETAIL:  Permission "invalid" does not exist
 ```
 
-3. **Audit Logging**
+Role not found:
 ```sql
--- Via trigger
-keyhippo_audit_rbac_role_permissions
+SELECT assign_permission_to_role('read_data', 'missing');
+ERROR:  role not found
+DETAIL:  Role "missing" does not exist
 ```
 
-## Error Handling
-
-1. **Invalid Role**
+Invalid conditions:
 ```sql
--- Raises exception
-SELECT keyhippo_rbac.assign_permission_to_role(
-    'invalid_role_id',
-    'manage_users'
+SELECT assign_permission_to_role(
+    'read_data',
+    'analyst',
+    '{"time_window": "always"}'
 );
+ERROR:  invalid conditions format
+DETAIL:  time_window must contain start and end times
 ```
 
-2. **Invalid Permission**
+Permission conflict:
 ```sql
--- Raises exception
-SELECT keyhippo_rbac.assign_permission_to_role(
-    'role_id',
-    'invalid_permission'
-);
+SELECT assign_permission_to_role('write_data', 'readonly');
+ERROR:  permission conflict
+DETAIL:  Role "readonly" cannot have write permissions
 ```
 
-3. **Duplicate Assignment**
-```sql
--- Silently ignored
-SELECT keyhippo_rbac.assign_permission_to_role(
-    'role_id',
-    'existing_permission'
-);
+## Grant Conditions
+
+Supported condition types:
+
+Time windows:
+```json
+{
+    "time_window": {
+        "start": "09:00",
+        "end": "17:00",
+        "timezone": "UTC"
+    }
+}
 ```
 
-## Performance
+Resource limits:
+```json
+{
+    "max_resources": 100,
+    "resource_types": ["api_key", "role"],
+    "scope": "tenant"
+}
+```
 
-- Single insert operation
-- Efficient permission lookup
-- No cascading effects
-- Minimal constraints
+IP restrictions:
+```json
+{
+    "ip_ranges": [
+        "10.0.0.0/8",
+        "172.16.0.0/12"
+    ]
+}
+```
 
-## Related Functions
+## Permissions Required
 
-- [create_role()](create_role.md)
-- [assign_role_to_user()](assign_role_to_user.md)
-- [authorize()](authorize.md)
+Caller must have either:
+- 'assign_permission' grant
+- System administrator access
+
+## Audit Trail
+
+Creates audit entry:
+```json
+{
+    "event_type": "permission_assigned",
+    "permission": "read_data",
+    "role": "analyst",
+    "conditions": {
+        "time_window": {
+            "start": "09:00",
+            "end": "17:00"
+        }
+    },
+    "granted_by": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+    "timestamp": "2024-01-01T00:00:00Z"
+}
+```
 
 ## See Also
 
-- [Role Permissions](../tables/role_permissions.md)
-- [Permissions](../tables/permissions.md)
-- [Roles](../tables/roles.md)
+- [create_role()](create_role.md)
+- [role_permissions table](../tables/role_permissions.md)
+- [permissions table](../tables/permissions.md)

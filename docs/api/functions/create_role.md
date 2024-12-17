@@ -1,187 +1,153 @@
 # create_role
 
-Creates a new role within a specified group.
+Create a new role in the RBAC system.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo_rbac.create_role(
-    p_name text,
-    p_description text,
-    p_group_id uuid,
-    p_role_type keyhippo.app_role
-)
-RETURNS uuid
+keyhippo.create_role(
+    name text,
+    description text DEFAULT NULL,
+    inherit_from uuid[] DEFAULT NULL,
+    metadata jsonb DEFAULT NULL
+) RETURNS uuid
 ```
+
+## Description
+
+`create_role` adds a new role and optionally sets up role inheritance. The function:
+1. Validates role name format
+2. Creates role record
+3. Establishes inheritance relationships
+4. Records creation in audit log
 
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| p_name | text | Name of the role |
-| p_description | text | Description of the role's purpose |
-| p_group_id | uuid | Group ID this role belongs to |
-| p_role_type | keyhippo.app_role | Either 'admin' or 'user' |
+| Name | Type | Description |
+|------|------|-------------|
+| name | text | Role identifier (a-z, 0-9, underscore) |
+| description | text | Optional role description |
+| inherit_from | uuid[] | Optional array of parent role IDs |
+| metadata | jsonb | Optional role metadata |
 
-## Returns
+## Return Value
 
-Returns the UUID of the newly created role.
+Returns the UUID of the created role.
 
-## Security
+## Examples
 
-- SECURITY INVOKER function
-- Requires manage_roles permission
-- Audit logged
-- Transaction safe
-
-## Example Usage
-
-### Basic Role
+Basic role:
 ```sql
-SELECT keyhippo_rbac.create_role(
-    'Developer',
-    'Software developer role',
-    'group_id_here',
-    'user'
+SELECT create_role('api_reader', 'Read-only API access');
+```
+
+Role with inheritance:
+```sql
+SELECT create_role(
+    'senior_analyst',
+    'Senior data analyst permissions',
+    ARRAY[
+        (SELECT role_id FROM roles WHERE name = 'analyst'),
+        (SELECT role_id FROM roles WHERE name = 'reporter')
+    ]::uuid[]
 );
 ```
 
-### Admin Role
+Role with metadata:
 ```sql
-SELECT keyhippo_rbac.create_role(
-    'Team Lead',
-    'Team leadership role',
-    'group_id_here',
-    'admin'
+SELECT create_role(
+    'temporary_admin',
+    'Limited-time administrative access',
+    NULL,
+    '{"expires_at": "2024-12-31", "reason": "Q4 deployment"}'
 );
 ```
 
-### Complete Setup
-```sql
-DO $$
-DECLARE
-    group_id uuid;
-    admin_role_id uuid;
-    user_role_id uuid;
-BEGIN
-    -- Create group
-    SELECT keyhippo_rbac.create_group(
-        'Engineering',
-        'Engineering team'
-    ) INTO group_id;
-    
-    -- Create admin role
-    SELECT keyhippo_rbac.create_role(
-        'Engineering Lead',
-        'Team leadership',
-        group_id,
-        'admin'
-    ) INTO admin_role_id;
-    
-    -- Create user role
-    SELECT keyhippo_rbac.create_role(
-        'Engineer',
-        'Team member',
-        group_id,
-        'user'
-    ) INTO user_role_id;
-    
-    -- Assign permissions
-    PERFORM keyhippo_rbac.assign_permission_to_role(
-        admin_role_id,
-        'manage_team'
-    );
-    
-    PERFORM keyhippo_rbac.assign_permission_to_role(
-        user_role_id,
-        'access_resources'
-    );
-END $$;
-```
+## Implementation
 
-## Implementation Notes
-
-1. **Role Creation**
+Role creation SQL:
 ```sql
 INSERT INTO keyhippo_rbac.roles (
     name,
     description,
-    group_id,
-    role_type
-)
-VALUES (
-    p_name,
-    p_description,
-    p_group_id,
-    p_role_type
-)
-RETURNING id
+    tenant_id,
+    metadata
+) VALUES (
+    $1,
+    $2,
+    current_tenant(),
+    $4
+) RETURNING role_id;
 ```
 
-2. **Unique Constraints**
+Inheritance setup:
 ```sql
--- Name must be unique within group
-UNIQUE (name, group_id)
+INSERT INTO keyhippo_rbac.role_inheritance (
+    parent_role_id,
+    child_role_id
+) 
+SELECT parent_id, role_id
+FROM unnest($3) as parent_id;
 ```
 
-3. **Role Types**
+## Error Cases
+
+Invalid name format:
 ```sql
-CREATE TYPE keyhippo.app_role AS ENUM (
-    'admin',
-    'user'
+SELECT create_role('Invalid Role');
+ERROR:  invalid role name
+DETAIL:  Role name must be lowercase, start with letter, 
+         contain only a-z, 0-9, underscore
+```
+
+Duplicate name:
+```sql
+SELECT create_role('api_reader');
+ERROR:  duplicate key value violates unique constraint
+DETAIL:  Role name "api_reader" already exists for this tenant
+```
+
+Invalid parent role:
+```sql
+SELECT create_role(
+    'analyst',
+    'Data analyst',
+    ARRAY['invalid-uuid']::uuid[]
 );
+ERROR:  invalid parent role
+DETAIL:  Role with ID invalid-uuid not found
 ```
 
-## Error Handling
-
-1. **Invalid Group**
+Circular inheritance:
 ```sql
--- Raises exception
-SELECT keyhippo_rbac.create_role(
-    'Role Name',
-    'Description',
-    'invalid_group_id',
-    'user'
-);
+SELECT create_role('circular', 'Bad inheritance', 
+    ARRAY[(SELECT role_id FROM roles WHERE name = 'child')]::uuid[]);
+ERROR:  circular role inheritance detected
+DETAIL:  Role inheritance would create a cycle
 ```
 
-2. **Duplicate Role**
-```sql
--- Raises exception
-SELECT keyhippo_rbac.create_role(
-    'Existing Role',
-    'Description',
-    'group_id',
-    'user'
-);
+## Permissions Required
+
+Caller must have either:
+- 'manage_roles' permission
+- System administrator access
+
+## Audit Trail
+
+Creates audit entry:
+```json
+{
+    "event_type": "role_created",
+    "role_id": "550e8400-e29b-41d4-a716-446655440000",
+    "role_name": "api_reader",
+    "created_by": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+    "inherited_from": ["91c35b46-8c55-4264-8373-cf4b1ce957b9"],
+    "timestamp": "2024-01-01T00:00:00Z"
+}
 ```
-
-3. **Invalid Role Type**
-```sql
--- Raises exception
-SELECT keyhippo_rbac.create_role(
-    'Role Name',
-    'Description',
-    'group_id',
-    'invalid_type'
-);
-```
-
-## Performance
-
-- Single insert operation
-- Foreign key validation
-- Efficient audit logging
-- No cascading effects
-
-## Related Functions
-
-- [create_group()](create_group.md)
-- [assign_role_to_user()](assign_role_to_user.md)
-- [assign_permission_to_role()](assign_permission_to_role.md)
 
 ## See Also
 
-- [Roles Table](../tables/roles.md)
-- [Groups Table](../tables/groups.md)
-- [Role Permissions](../tables/role_permissions.md)
+- [assign_role_to_user()](assign_role_to_user.md)
+- [assign_permission_to_role()](assign_permission_to_role.md)
+- [roles table](../tables/roles.md)

@@ -1,186 +1,157 @@
 # assign_role_to_user
 
-Assigns a role to a user within a specific group.
+Grant a role to a user through group membership.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo_rbac.assign_role_to_user(
-    p_user_id uuid,
-    p_group_id uuid,
-    p_role_id uuid
-)
-RETURNS void
+keyhippo.assign_role_to_user(
+    user_id uuid,
+    role_name text,
+    group_name text DEFAULT NULL,
+    expires_at timestamptz DEFAULT NULL
+) RETURNS void
 ```
+
+## Description
+
+`assign_role_to_user` grants a role to a user by:
+1. Finding or creating a group if group_name provided
+2. Adding user to that group
+3. Assigning role to user-group pair
+4. Setting optional expiration
+5. Recording assignment in audit log
 
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| p_user_id | uuid | User to assign the role to |
-| p_group_id | uuid | Group context for the role |
-| p_role_id | uuid | Role to assign |
+| Name | Type | Description |
+|------|------|-------------|
+| user_id | uuid | Target user's ID |
+| role_name | text | Name of role to assign |
+| group_name | text | Optional group context |
+| expires_at | timestamptz | Optional expiration time |
 
-## Security
+## Examples
 
-- SECURITY INVOKER function
-- Requires manage_roles permission
-- Audit logged
-- Transaction safe
-
-## Performance
-
-- P99 latency: 0.016ms
-- Operations/sec: 62,500 (single core)
-- Efficient for bulk operations
-- Minimal constraints
-
-## Example Usage
-
-### Basic Assignment
+Direct role assignment:
 ```sql
-SELECT keyhippo_rbac.assign_role_to_user(
-    'user_id_here',
-    'group_id_here',
-    'role_id_here'
+SELECT assign_role_to_user(
+    '550e8400-e29b-41d4-a716-446655440000',
+    'analyst'
 );
 ```
 
-### Bulk Assignment
+Role in group context:
 ```sql
-CREATE OR REPLACE FUNCTION assign_team_role(
-    team_ids uuid[],
-    role_id uuid
+SELECT assign_role_to_user(
+    '550e8400-e29b-41d4-a716-446655440000',
+    'analyst',
+    'data_team'
+);
+```
+
+Temporary assignment:
+```sql
+SELECT assign_role_to_user(
+    '550e8400-e29b-41d4-a716-446655440000',
+    'admin',
+    'emergency_access',
+    now() + interval '24 hours'
+);
+```
+
+## Implementation
+
+Role assignment SQL:
+```sql
+WITH group_id AS (
+    SELECT group_id FROM groups 
+    WHERE name = $3
+    UNION ALL
+    SELECT group_id FROM create_group($3)
+    LIMIT 1
+),
+user_group AS (
+    INSERT INTO user_groups (user_id, group_id)
+    SELECT $1, group_id FROM group_id
+    ON CONFLICT DO NOTHING
 )
-RETURNS void
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    INSERT INTO keyhippo_rbac.user_group_roles (
-        user_id,
-        group_id,
-        role_id
-    )
-    SELECT 
-        id,
-        'group_id_here',
-        role_id
-    FROM unnest(team_ids) id
-    ON CONFLICT (user_id, group_id, role_id) DO NOTHING;
-END;
-$$;
-```
-
-### Complete User Setup
-```sql
-DO $$
-DECLARE
-    v_group_id uuid;
-    v_role_id uuid;
-    v_user_id uuid;
-BEGIN
-    -- Create group if needed
-    SELECT keyhippo_rbac.create_group(
-        'New Team',
-        'Team description'
-    ) INTO v_group_id;
-    
-    -- Create role if needed
-    SELECT keyhippo_rbac.create_role(
-        'Team Member',
-        'Basic team access',
-        v_group_id,
-        'user'
-    ) INTO v_role_id;
-    
-    -- Get user ID
-    SELECT id INTO v_user_id
-    FROM auth.users
-    WHERE email = 'user@example.com';
-    
-    -- Assign role
-    PERFORM keyhippo_rbac.assign_role_to_user(
-        v_user_id,
-        v_group_id,
-        v_role_id
-    );
-END $$;
-```
-
-## Implementation Notes
-
-1. **Role Assignment**
-```sql
-INSERT INTO keyhippo_rbac.user_group_roles (
+INSERT INTO user_group_roles (
     user_id,
     group_id,
-    role_id
+    role_id,
+    expires_at
 )
-VALUES (
-    p_user_id,
-    p_group_id,
-    p_role_id
-)
-ON CONFLICT (user_id, group_id, role_id) DO NOTHING;
+SELECT 
+    $1,
+    group_id,
+    r.role_id,
+    $4
+FROM group_id
+JOIN roles r ON r.name = $2
+ON CONFLICT (user_id, group_id, role_id) 
+DO UPDATE SET expires_at = $4;
 ```
 
-2. **Constraints**
-```sql
--- Primary key
-PRIMARY KEY (user_id, group_id, role_id)
+## Error Cases
 
--- Foreign keys
-REFERENCES auth.users(id)
-REFERENCES keyhippo_rbac.groups(id)
-REFERENCES keyhippo_rbac.roles(id)
+Role not found:
+```sql
+SELECT assign_role_to_user('550e8400-e29b-41d4-a716-446655440000', 'missing');
+ERROR:  role not found
+DETAIL:  Role "missing" does not exist
 ```
 
-3. **Audit Logging**
+Invalid user:
 ```sql
--- Via trigger
-keyhippo_audit_rbac_user_group_roles
+SELECT assign_role_to_user('invalid-uuid', 'analyst');
+ERROR:  user not found
+DETAIL:  User with ID invalid-uuid does not exist
 ```
 
-## Error Handling
-
-1. **Invalid User**
+Invalid expiration:
 ```sql
--- Raises exception
-SELECT keyhippo_rbac.assign_role_to_user(
-    'invalid_user_id',
-    'group_id',
-    'role_id'
+SELECT assign_role_to_user(
+    '550e8400-e29b-41d4-a716-446655440000',
+    'admin',
+    NULL,
+    '2020-01-01'
 );
+ERROR:  invalid expiration time
+DETAIL:  Expiration must be in the future
 ```
 
-2. **Invalid Group**
+Role conflict:
 ```sql
--- Raises exception
-SELECT keyhippo_rbac.assign_role_to_user(
-    'user_id',
-    'invalid_group_id',
-    'role_id'
-);
+SELECT assign_role_to_user('550e8400-e29b-41d4-a716-446655440000', 'user');
+ERROR:  role assignment conflict
+DETAIL:  User cannot hold roles "admin" and "user" simultaneously
 ```
 
-3. **Invalid Role**
-```sql
--- Raises exception
-SELECT keyhippo_rbac.assign_role_to_user(
-    'user_id',
-    'group_id',
-    'invalid_role_id'
-);
+## Permissions Required
+
+Caller must have either:
+- 'assign_role' permission
+- System administrator access
+- Group administrator access (if group specified)
+
+## Audit Trail
+
+Creates audit entry:
+```json
+{
+    "event_type": "role_assigned",
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "role_name": "analyst",
+    "group_name": "data_team",
+    "assigned_by": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+    "expires_at": "2024-01-02T00:00:00Z",
+    "timestamp": "2024-01-01T00:00:00Z"
+}
 ```
-
-## Related Functions
-
-- [create_group()](create_group.md)
-- [create_role()](create_role.md)
-- [assign_permission_to_role()](assign_permission_to_role.md)
 
 ## See Also
 
-- [User Group Roles](../tables/user_group_roles.md)
-- [Groups](../tables/groups.md)
-- [Roles](../tables/roles.md)
+- [create_role()](create_role.md)
+- [create_group()](create_group.md)
+- [user_group_roles table](../tables/user_group_roles.md)
