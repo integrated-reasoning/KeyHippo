@@ -1,266 +1,337 @@
-# Multi-Tenant Access Control with KeyHippo
+# Multi-Tenant Implementation Guide
 
-This guide demonstrates how to implement secure multi-tenant access control using KeyHippo's API key and claims system.
+## Tenant Isolation
 
-## Overview
+Database schema:
+```sql
+-- Tenant definition
+CREATE TABLE tenants (
+    tenant_id uuid PRIMARY KEY,
+    name text NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    settings jsonb,
+    status text NOT NULL DEFAULT 'active'
+);
 
-Multi-tenant applications need to ensure that:
-1. Users can only access their authorized tenants
-2. API keys can be scoped to specific tenants
-3. Access control is consistent across all authentication methods
-4. Policies are atomic and efficient
+-- Resource ownership
+ALTER TABLE resources
+ADD COLUMN tenant_id uuid REFERENCES tenants(tenant_id);
+
+-- Add tenant isolation
+ALTER TABLE resources
+ENABLE ROW LEVEL SECURITY;
+```
+
+RLS policies:
+```sql
+-- Basic isolation
+CREATE POLICY tenant_isolation ON resources
+    FOR ALL
+    USING (
+        tenant_id = current_tenant_id()
+    );
+
+-- Cross-tenant sharing
+CREATE POLICY tenant_sharing ON resources
+    FOR SELECT
+    USING (
+        tenant_id = current_tenant_id()
+        OR id = ANY(
+            SELECT resource_id 
+            FROM shared_resources 
+            WHERE shared_with = current_tenant_id()
+        )
+    );
+```
 
 ## Implementation Pattern
 
-### 1. Access Control Functions
-
-Create tenant access control functions that handle both user and API key authentication:
-
+Session context:
 ```sql
-CREATE OR REPLACE FUNCTION public.can_access_tenant(tenant_id uuid)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, private, keyhippo
-AS $$
-DECLARE
-    ctx RECORD;
-    key_tenant_id uuid;
-    key_data jsonb;
-    user_access boolean;
+-- Set context
+CREATE FUNCTION set_tenant_context(tid uuid)
+RETURNS void AS $$
 BEGIN
-    -- Get current user context
-    SELECT * INTO ctx FROM keyhippo.current_user_context();
+    PERFORM set_config(
+        'app.current_tenant_id',
+        tid::text,
+        false
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- Get context
+CREATE FUNCTION current_tenant_id()
+RETURNS uuid AS $$
+    SELECT NULLIF(
+        current_setting('app.current_tenant_id', true),
+        ''
+    )::uuid;
+$$ LANGUAGE sql STABLE;
+```
+
+Connection handling:
+```sql
+-- Connection setup
+CREATE FUNCTION setup_connection()
+RETURNS void AS $$
+BEGIN
+    -- Set search path
+    PERFORM set_config(
+        'search_path',
+        current_tenant_schema() || ',public',
+        false
+    );
     
-    -- Check user-based access if authenticated
-    IF ctx.user_id IS NOT NULL THEN
-        SELECT EXISTS(
-            SELECT 1
-            FROM tenant_users
-            WHERE user_id = ctx.user_id
-            AND tenant_id = $1
-        ) INTO user_access;
-    ELSE
-        user_access := FALSE;
+    -- Set tenant context
+    PERFORM set_tenant_context(
+        current_tenant_id()
+    );
+    
+    -- Set RLS context
+    SET SESSION AUTHORIZATION DEFAULT;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+## Data Separation
+
+Schema-based:
+```sql
+CREATE FUNCTION create_tenant_schema(tid uuid)
+RETURNS void AS $$
+BEGIN
+    -- Create schema
+    EXECUTE format(
+        'CREATE SCHEMA tenant_%s',
+        replace(tid::text, '-', '')
+    );
+    
+    -- Create tables
+    EXECUTE format(
+        'CREATE TABLE tenant_%s.resources (...)',
+        replace(tid::text, '-', '')
+    );
+END;
+$$ LANGUAGE plpgsql;
+```
+
+RLS-based:
+```sql
+-- Shared tables with RLS
+CREATE POLICY tenant_data ON resources
+    FOR ALL
+    USING (
+        tenant_id = current_tenant_id()
+    );
+
+-- Variant with inheritance
+CREATE POLICY tenant_hierarchy ON resources
+    FOR ALL
+    USING (
+        tenant_id IN (
+            SELECT child_id 
+            FROM tenant_hierarchy
+            WHERE parent_id = current_tenant_id()
+        )
+    );
+```
+
+## Resource Management
+
+Creation:
+```sql
+CREATE FUNCTION create_resource(data jsonb)
+RETURNS uuid AS $$
+DECLARE
+    rid uuid;
+BEGIN
+    INSERT INTO resources (
+        tenant_id,
+        name,
+        data
+    ) VALUES (
+        current_tenant_id(),
+        data->>'name',
+        data
+    )
+    RETURNING id INTO rid;
+    
+    RETURN rid;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+Sharing:
+```sql
+CREATE FUNCTION share_resource(
+    resource_id uuid,
+    target_tenant_id uuid
+) RETURNS void AS $$
+BEGIN
+    -- Verify ownership
+    IF NOT exists (
+        SELECT 1 FROM resources
+        WHERE id = resource_id
+        AND tenant_id = current_tenant_id()
+    ) THEN
+        RAISE EXCEPTION 'not resource owner';
     END IF;
 
-    -- Check API key claims
-    key_data := keyhippo.key_data();
-    IF key_data IS NOT NULL AND key_data->'claims'->>'tenant_id' IS NOT NULL THEN
-        key_tenant_id := (key_data->'claims'->>'tenant_id')::uuid;
-    END IF;
-
-    -- Grant access if either check passes
-    RETURN COALESCE(user_access, FALSE) 
-        OR COALESCE(key_tenant_id = tenant_id, FALSE);
+    -- Create share
+    INSERT INTO shared_resources (
+        resource_id,
+        shared_with,
+        shared_by,
+        shared_at
+    ) VALUES (
+        resource_id,
+        target_tenant_id,
+        current_user_id(),
+        now()
+    );
 END;
-$$;
+$$ LANGUAGE plpgsql;
 ```
 
-### 2. Resource-Specific Access Control
+## Authentication Integration
 
-Create specific access control functions for different resource types:
-
+API key creation:
 ```sql
-CREATE OR REPLACE FUNCTION public.can_access_resource(resource_id uuid)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, private, keyhippo
-AS $$
-DECLARE
-    ctx RECORD;
-    v_tenant_id uuid;
-    key_data jsonb;
-    key_user_id uuid;
-BEGIN
-    -- Get resource's tenant
-    SELECT tenant_id INTO v_tenant_id
-    FROM resources
-    WHERE id = resource_id;
-
-    -- Use tenant access control
-    RETURN public.can_access_tenant(v_tenant_id);
-END;
-$$;
-```
-
-### 3. Row Level Security Policies
-
-Apply consistent RLS policies across your schema:
-
-```sql
--- Enable RLS
-ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE resources ENABLE ROW LEVEL SECURITY;
-
--- Create policies
-CREATE POLICY tenant_access_policy ON tenants
-    FOR ALL TO authenticated, anon
-    USING (can_access_tenant(id));
-
-CREATE POLICY resource_access_policy ON resources
-    FOR ALL TO authenticated, anon
-    USING (can_access_resource(id));
-```
-
-### 4. API Key Configuration
-
-Create API keys with tenant-specific claims:
-
-```sql
--- Create an API key for a specific tenant
-SELECT * FROM keyhippo.create_api_key(
-    'Tenant API Key',
-    'default'
-);
-
--- Add tenant claim
-SELECT keyhippo.update_key_claims(
-    'key_id_here',
-    jsonb_build_object('tenant_id', 'tenant_uuid_here')
-);
-```
-
-## Security Considerations
-
-### Transaction Safety
-
-Wrap policy changes in transactions:
-
-```sql
-BEGIN;
-    -- Drop existing policies
-    DROP POLICY IF EXISTS "tenant_access" ON resources;
-    
-    -- Create new policies
-    CREATE POLICY "tenant_access" ON resources
-        FOR ALL TO authenticated, anon
-        USING (can_access_tenant(tenant_id));
-        
-    -- Grant necessary permissions
-    GRANT SELECT, UPDATE ON resources TO authenticated;
-COMMIT;
-```
-
-### Function Security
-
-1. Always use SECURITY DEFINER for access control functions
-2. Set explicit search paths
-3. Use parameter types that can't be coerced
-
-```sql
-CREATE OR REPLACE FUNCTION public.can_access_tenant(tenant_id uuid)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, private, keyhippo
-AS $$
-```
-
-### Permissions
-
-Grant minimal required permissions:
-
-```sql
--- Grant function execution
-GRANT EXECUTE ON FUNCTION public.can_access_tenant(uuid) TO authenticated, anon;
-
--- Grant table access
-GRANT SELECT ON public.resources TO authenticated;
-GRANT UPDATE ON public.resources TO authenticated;
-```
-
-## Best Practices
-
-1. **Consistent Access Control**
-   - Use the same access control functions across all policies
-   - Handle both user and API key authentication
-   - Consider implementing tenant hierarchies if needed
-
-2. **Claims Management**
-   - Keep claims minimal and specific
-   - Use UUIDs for tenant identifiers
-   - Consider claim expiration for sensitive access
-
-3. **Performance**
-   - Index tenant_id columns
-   - Use efficient joins in access control functions
-   - Cache frequent tenant access checks
-
-4. **Atomic Updates**
-   - Wrap policy changes in transactions
-   - Consider impact on existing sessions
-   - Test policy changes thoroughly
-
-## Example: Complete Tenant System
-
-Here's a complete example of a tenant system:
-
-```sql
--- Tenant structure
-CREATE TABLE tenants (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name text NOT NULL,
-    settings jsonb DEFAULT '{}'
-);
-
-CREATE TABLE tenant_users (
-    tenant_id uuid REFERENCES tenants(id),
-    user_id uuid REFERENCES auth.users(id),
-    role text NOT NULL,
-    PRIMARY KEY (tenant_id, user_id)
-);
-
--- Access control
-CREATE OR REPLACE FUNCTION public.can_access_tenant(tenant_id uuid)
-RETURNS boolean AS $$
-    -- Implementation as above
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Policies
-ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tenant_users ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_access ON tenants
-    FOR ALL TO authenticated, anon
-    USING (can_access_tenant(id));
-
-CREATE POLICY tenant_user_access ON tenant_users
-    FOR ALL TO authenticated, anon
-    USING (can_access_tenant(tenant_id));
-
--- API key creation with tenant claim
-CREATE OR REPLACE FUNCTION create_tenant_api_key(
+CREATE FUNCTION create_tenant_api_key(
     tenant_id uuid,
     description text
-) RETURNS text
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
+) RETURNS text AS $$
 DECLARE
-    key_record record;
+    key_string text;
 BEGIN
-    -- Create API key
-    SELECT * INTO key_record FROM keyhippo.create_api_key(
+    -- Create key
+    SELECT create_api_key(
         description,
-        'default'
-    );
+        jsonb_build_object(
+            'tenant_id', tenant_id,
+            'type', 'tenant_key'
+        )
+    ) INTO key_string;
     
-    -- Add tenant claim
-    PERFORM keyhippo.update_key_claims(
-        key_record.api_key_id,
-        jsonb_build_object('tenant_id', tenant_id)
-    );
-    
-    RETURN key_record.api_key;
+    RETURN key_string;
 END;
-$$;
+$$ LANGUAGE plpgsql;
 ```
 
-## Related Documentation
+Key validation:
+```sql
+CREATE FUNCTION validate_tenant_key(key text)
+RETURNS jsonb AS $$
+DECLARE
+    key_data jsonb;
+BEGIN
+    -- Verify key
+    SELECT verify_api_key(key)
+    INTO key_data;
+    
+    -- Check tenant context
+    IF key_data->>'tenant_id' != current_tenant_id()::text THEN
+        RETURN NULL;
+    END IF;
+    
+    RETURN key_data;
+END;
+$$ LANGUAGE plpgsql;
+```
 
-- [API Key Claims](../api/functions/update_key_claims.md)
-- [Row Level Security](../api/security/rls_policies.md)
-- [Current User Context](../api/functions/current_user_context.md)
-- [Key Data Function](../api/functions/key_data.md)
+## Role Separation
+
+Tenant roles:
+```sql
+-- Create tenant-specific role
+CREATE FUNCTION create_tenant_role(
+    tenant_id uuid,
+    role_name text
+) RETURNS uuid AS $$
+DECLARE
+    rid uuid;
+BEGIN
+    INSERT INTO roles (
+        name,
+        tenant_id,
+        created_at
+    ) VALUES (
+        role_name,
+        tenant_id,
+        now()
+    )
+    RETURNING role_id INTO rid;
+    
+    RETURN rid;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+Permission assignment:
+```sql
+CREATE FUNCTION assign_tenant_permission(
+    role_id uuid,
+    permission text
+) RETURNS void AS $$
+BEGIN
+    -- Verify tenant context
+    IF NOT exists (
+        SELECT 1 FROM roles
+        WHERE role_id = $1
+        AND tenant_id = current_tenant_id()
+    ) THEN
+        RAISE EXCEPTION 'invalid role';
+    END IF;
+
+    -- Assign permission
+    INSERT INTO role_permissions (
+        role_id,
+        permission_id
+    )
+    SELECT 
+        $1,
+        permission_id
+    FROM permissions
+    WHERE name = $2;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+## Usage Tracking
+
+Tenant metrics:
+```sql
+CREATE MATERIALIZED VIEW tenant_metrics AS
+SELECT 
+    tenant_id,
+    date_trunc('hour', created_at) as hour,
+    count(*) as request_count,
+    count(DISTINCT user_id) as unique_users,
+    count(DISTINCT resource_id) as resources_accessed
+FROM request_log
+WHERE created_at > now() - interval '30 days'
+GROUP BY tenant_id, date_trunc('hour', created_at);
+
+REFRESH MATERIALIZED VIEW CONCURRENTLY tenant_metrics;
+```
+
+Resource usage:
+```sql
+CREATE VIEW tenant_resource_usage AS
+SELECT 
+    t.tenant_id,
+    t.name as tenant_name,
+    count(r.*) as total_resources,
+    sum(r.size_bytes) as storage_used,
+    max(r.updated_at) as last_modified
+FROM tenants t
+LEFT JOIN resources r ON r.tenant_id = t.tenant_id
+GROUP BY t.tenant_id, t.name;
+```
+
+## See Also
+
+- [Tenant Quickstart](multi_tenant_quickstart.md)
+- [RLS Policies](../api/security/rls_policies.md)
+- [Database Grants](../api/security/grants.md)

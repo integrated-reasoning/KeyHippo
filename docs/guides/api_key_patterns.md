@@ -1,319 +1,357 @@
-# API Key Configuration Patterns
+# API Key Implementation Patterns
 
-This guide demonstrates common patterns for configuring and using API keys with KeyHippo.
+## Key Format
 
-## Access Control Patterns
-
-### 1. Tenant-Specific Keys
-
-Configure API keys to access specific tenants:
-
-```sql
--- Create and configure tenant key
-DO $$
-DECLARE
-    key_record record;
-    tenant_id uuid := 'tenant_uuid_here';
-BEGIN
-    -- Create key
-    SELECT * INTO key_record 
-    FROM keyhippo.create_api_key('Tenant Access Key');
-    
-    -- Add tenant claim
-    PERFORM keyhippo.update_key_claims(
-        key_record.api_key_id,
-        jsonb_build_object(
-            'tenant_id', tenant_id,
-            'role', 'tenant_admin'
-        )
-    );
-END $$;
+Structure:
+```
+prefix.key
+KH2ABJM1.NBTGK19FH27DJSM4
 ```
 
-### 2. User Impersonation Keys
-
-Create API keys that act on behalf of specific users:
-
+Components:
 ```sql
--- Create user-specific key
-DO $$
-DECLARE
-    key_record record;
-    user_id uuid := 'user_uuid_here';
-BEGIN
-    SELECT * INTO key_record 
-    FROM keyhippo.create_api_key('User Service Key');
-    
-    PERFORM keyhippo.update_key_claims(
-        key_record.api_key_id,
-        jsonb_build_object(
-            'user_id', user_id,
-            'scope', 'user_access'
-        )
-    );
-END $$;
+-- Prefix (8 chars)
+base32(first_5_bytes)
+Used for key lookup
+
+-- Key (32 chars)
+base32(random_bytes(30))
+Used for authentication
 ```
 
-### 3. Resource-Scoped Keys
-
-Limit keys to specific resources or operations:
-
+Implementation:
 ```sql
--- Create resource-scoped key
-DO $$
+CREATE FUNCTION generate_api_key()
+RETURNS text AS $$
 DECLARE
-    key_record record;
+    key_bytes bytea;
+    key_string text;
+    prefix_string text;
 BEGIN
-    SELECT * INTO key_record 
-    FROM keyhippo.create_api_key(
-        'Analytics Read Key',
-        'analytics:read'
+    -- Generate random bytes
+    key_bytes := gen_random_bytes(30);
+    
+    -- Create prefix from first 5 bytes
+    prefix_string := encode(
+        substring(key_bytes FROM 1 FOR 5),
+        'base32'
     );
     
-    PERFORM keyhippo.update_key_claims(
-        key_record.api_key_id,
-        jsonb_build_object(
-            'allowed_resources', array['metrics', 'reports'],
-            'access_level', 'read'
-        )
-    );
-END $$;
-```
-
-## Authorization Functions
-
-### 1. Multi-Context Authorization
-
-Handle both user and API key access:
-
-```sql
-CREATE OR REPLACE FUNCTION can_access_resource(resource_id uuid)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    ctx record;
-    key_data jsonb;
-    resource_type text;
-    allowed_resources text[];
-BEGIN
-    -- Get contexts
-    SELECT * INTO ctx 
-    FROM keyhippo.current_user_context();
+    -- Create key from all bytes
+    key_string := encode(key_bytes, 'base32');
     
-    key_data := keyhippo.key_data();
-    
-    -- Get resource type
-    SELECT type INTO resource_type
-    FROM resources
-    WHERE id = resource_id;
-    
-    -- Check API key access
-    IF key_data IS NOT NULL THEN
-        allowed_resources := (key_data->'claims'->>'allowed_resources')::text[];
-        IF resource_type = ANY(allowed_resources) THEN
-            RETURN true;
-        END IF;
-    END IF;
-    
-    -- Fall back to user access
-    RETURN check_user_access(ctx.user_id, resource_id);
+    RETURN prefix_string || '.' || key_string;
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 ```
 
-### 2. Role-Based Access
+## Storage Pattern
 
-Implement role checks using API key claims:
-
+Split storage model:
 ```sql
-CREATE OR REPLACE FUNCTION has_role(required_role text)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    ctx record;
-    key_data jsonb;
-    key_role text;
-BEGIN
-    -- Get current context
-    SELECT * INTO ctx 
-    FROM keyhippo.current_user_context();
-    
-    -- Check user roles first
-    IF ctx.user_id IS NOT NULL THEN
-        IF check_user_role(ctx.user_id, required_role) THEN
-            RETURN true;
-        END IF;
-    END IF;
-    
-    -- Check API key role
-    key_data := keyhippo.key_data();
-    IF key_data IS NOT NULL THEN
-        key_role := key_data->'claims'->>'role';
-        RETURN key_role = required_role;
-    END IF;
-    
-    RETURN false;
-END;
-$$;
-```
-
-## Policy Implementation
-
-### 1. Resource Policies
-
-```sql
--- Enable RLS
-ALTER TABLE resources ENABLE ROW LEVEL SECURITY;
-
--- Create flexible access policy
-CREATE POLICY resource_access ON resources
-    FOR ALL TO authenticated, anon
-    USING (
-        can_access_resource(id)
-        AND (
-            -- Check API key access level
-            (
-                (keyhippo.key_data()->'claims'->>'access_level') = 'admin'
-                OR
-                (keyhippo.key_data()->'claims'->>'access_level') = 'read' 
-                AND current_setting('request.method') = 'GET'
-            )
-            OR
-            -- Check user permissions
-            has_role('admin')
-        )
-    );
-```
-
-### 2. Tenant Policies
-
-```sql
--- Enable RLS
-ALTER TABLE tenant_data ENABLE ROW LEVEL SECURITY;
-
--- Create tenant-aware policy
-CREATE POLICY tenant_data_access ON tenant_data
-    FOR ALL TO authenticated, anon
-    USING (
-        tenant_id = (keyhippo.key_data()->'claims'->>'tenant_id')::uuid
-        OR
-        tenant_id IN (
-            SELECT t.id 
-            FROM tenants t
-            JOIN tenant_users tu ON tu.tenant_id = t.id
-            WHERE tu.user_id = auth.uid()
-        )
-    );
-```
-
-## Best Practices
-
-### 1. Key Creation
-
-```sql
--- Helper function for key creation
-CREATE OR REPLACE FUNCTION create_scoped_key(
-    description text,
+-- Metadata (searchable)
+CREATE TABLE api_key_metadata (
+    key_id uuid PRIMARY KEY,
+    key_prefix text NOT NULL,
+    user_id uuid NOT NULL,
     scope text,
-    claims jsonb
-) RETURNS text
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
+    expires_at timestamptz,
+    status text
+);
+
+-- Secrets (restricted)
+CREATE TABLE api_key_secrets (
+    key_id uuid PRIMARY KEY,
+    key_hash text NOT NULL
+);
+```
+
+Key creation:
+```sql
+WITH new_key AS (
+    SELECT 
+        gen_random_uuid() as key_id,
+        generate_api_key() as key_string
+)
+INSERT INTO api_key_metadata (
+    key_id,
+    key_prefix,
+    user_id,
+    scope,
+    expires_at
+)
+SELECT 
+    key_id,
+    split_part(key_string, '.', 1),
+    current_user_id(),
+    'default',
+    now() + interval '1 year'
+FROM new_key
+RETURNING key_id;
+
+INSERT INTO api_key_secrets (
+    key_id,
+    key_hash
+)
+SELECT 
+    key_id,
+    crypt(key_string, gen_salt('bf', 10))
+FROM new_key;
+```
+
+## Validation Pattern
+
+Fast path lookup:
+```sql
+CREATE INDEX idx_api_key_prefix 
+ON api_key_metadata(key_prefix);
+
+CREATE INDEX idx_api_key_status 
+ON api_key_metadata(status, expires_at) 
+WHERE status = 'active';
+```
+
+Validation function:
+```sql
+CREATE FUNCTION verify_api_key(key text)
+RETURNS jsonb AS $$
 DECLARE
-    key_record record;
+    key_parts text[];
+    key_data record;
+    result jsonb;
 BEGIN
-    -- Validate claims
-    IF NOT validate_claims(claims) THEN
-        RAISE EXCEPTION 'Invalid claims structure';
+    -- Split key
+    key_parts := string_to_array(key, '.');
+    IF array_length(key_parts, 1) != 2 THEN
+        RETURN NULL;
     END IF;
 
-    -- Create key
-    SELECT * INTO key_record 
-    FROM keyhippo.create_api_key(description, scope);
-    
-    -- Add claims
-    PERFORM keyhippo.update_key_claims(
-        key_record.api_key_id,
-        claims
+    -- Lookup metadata
+    SELECT INTO key_data
+        k.key_id,
+        k.user_id,
+        k.scope,
+        k.status,
+        k.expires_at,
+        s.key_hash
+    FROM api_key_metadata k
+    JOIN api_key_secrets s ON s.key_id = k.key_id
+    WHERE k.key_prefix = key_parts[1]
+    AND k.status = 'active'
+    AND k.expires_at > now();
+
+    -- Key not found
+    IF key_data IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    -- Verify hash
+    IF NOT crypt(key, key_data.key_hash) = key_data.key_hash THEN
+        RETURN NULL;
+    END IF;
+
+    -- Return context
+    RETURN jsonb_build_object(
+        'user_id', key_data.user_id,
+        'key_id', key_data.key_id,
+        'scope', key_data.scope
     );
-    
-    RETURN key_record.api_key;
 END;
-$$;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 ```
 
-### 2. Claims Validation
+## Rotation Pattern
 
+Graceful rotation:
 ```sql
-CREATE OR REPLACE FUNCTION validate_claims(claims jsonb)
-RETURNS boolean
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    -- Check required fields
-    IF claims->>'tenant_id' IS NULL AND 
-       claims->>'user_id' IS NULL AND
-       claims->>'role' IS NULL THEN
-        RETURN false;
-    END IF;
-    
-    -- Validate UUIDs
-    IF claims->>'tenant_id' IS NOT NULL THEN
-        PERFORM claims->>'tenant_id'::uuid;
-    END IF;
-    
-    -- Add more validation as needed
-    
-    RETURN true;
-EXCEPTION
-    WHEN OTHERS THEN
-        RETURN false;
-END;
-$$;
-```
-
-### 3. Key Rotation
-
-```sql
-CREATE OR REPLACE FUNCTION rotate_tenant_key(
+CREATE FUNCTION rotate_api_key(
     old_key_id uuid,
-    tenant_id uuid
-) RETURNS text
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
+    grace_period interval DEFAULT '24 hours'
+) RETURNS text AS $$
 DECLARE
-    new_key record;
-    old_claims jsonb;
+    new_key_id uuid;
+    new_key text;
 BEGIN
-    -- Get existing claims
-    SELECT claims INTO old_claims
-    FROM keyhippo.api_key_metadata
-    WHERE id = old_key_id;
-    
-    -- Create new key with same claims
-    SELECT * INTO new_key 
-    FROM keyhippo.rotate_api_key(old_key_id);
-    
-    -- Update claims on new key
-    PERFORM keyhippo.update_key_claims(
-        new_key.api_key_id,
-        old_claims
-    );
-    
-    RETURN new_key.api_key;
+    -- Start transaction
+    BEGIN
+        -- Create new key
+        SELECT 
+            k.key_id, k.key_string 
+        INTO new_key_id, new_key
+        FROM create_api_key(
+            (SELECT description FROM api_key_metadata 
+             WHERE key_id = old_key_id)
+        ) k;
+
+        -- Copy metadata
+        UPDATE api_key_metadata 
+        SET
+            scope = old.scope,
+            metadata = jsonb_set(
+                old.metadata,
+                '{rotation}',
+                jsonb_build_object(
+                    'previous_key', old_key_id,
+                    'rotated_at', now()
+                )
+            )
+        FROM api_key_metadata old
+        WHERE api_key_metadata.key_id = new_key_id
+        AND old.key_id = old_key_id;
+
+        -- Set expiry on old key
+        UPDATE api_key_metadata 
+        SET
+            expires_at = now() + grace_period,
+            metadata = jsonb_set(
+                metadata,
+                '{rotation}',
+                jsonb_build_object(
+                    'new_key', new_key_id,
+                    'rotated_at', now()
+                )
+            )
+        WHERE key_id = old_key_id;
+
+        RETURN new_key;
+    EXCEPTION WHEN OTHERS THEN
+        -- Cleanup on error
+        DELETE FROM api_key_metadata 
+        WHERE key_id = new_key_id;
+        RAISE;
+    END;
 END;
-$$;
+$$ LANGUAGE plpgsql;
 ```
 
-## Related Documentation
+## Rate Limiting Pattern
 
-- [API Key Management](../api/functions/create_api_key.md)
-- [Claims Management](../api/functions/update_key_claims.md)
-- [Multi-Tenant Guide](multi_tenant.md)
-- [Security Best Practices](../api/security/function_security.md)
+Implementation:
+```sql
+CREATE UNLOGGED TABLE rate_limits (
+    key_id uuid,
+    window_start timestamptz,
+    request_count int,
+    PRIMARY KEY (key_id, window_start)
+);
+
+CREATE FUNCTION check_rate_limit(
+    key_id uuid,
+    window interval,
+    max_requests int
+) RETURNS boolean AS $$
+DECLARE
+    window_start timestamptz;
+    current_count int;
+BEGIN
+    -- Calculate window
+    window_start := date_trunc(
+        'minute',
+        now()
+    );
+    
+    -- Get/update count
+    INSERT INTO rate_limits AS r
+        (key_id, window_start, request_count)
+    VALUES
+        ($1, window_start, 1)
+    ON CONFLICT (key_id, window_start) DO UPDATE
+    SET request_count = r.request_count + 1
+    RETURNING request_count INTO current_count;
+    
+    -- Check limit
+    RETURN current_count <= max_requests;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+Cleanup job:
+```sql
+CREATE FUNCTION cleanup_rate_limits()
+RETURNS void AS $$
+BEGIN
+    DELETE FROM rate_limits
+    WHERE window_start < now() - interval '1 hour';
+END;
+$$ LANGUAGE sql;
+```
+
+## Scope Pattern
+
+Scope definition:
+```sql
+CREATE TABLE scopes (
+    name text PRIMARY KEY,
+    permissions text[],
+    conditions jsonb
+);
+
+INSERT INTO scopes (name, permissions, conditions) VALUES
+(
+    'analytics',
+    ARRAY['read_data', 'export_reports'],
+    '{
+        "time_window": {
+            "start": "00:00",
+            "end": "23:59"
+        },
+        "rate_limit": {
+            "requests_per_minute": 60
+        }
+    }'
+);
+```
+
+Permission check:
+```sql
+CREATE FUNCTION check_scope_permission(
+    scope_name text,
+    permission text
+) RETURNS boolean AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM scopes
+        WHERE name = $1
+        AND $2 = ANY(permissions)
+        AND evaluate_conditions(conditions)
+    );
+$$ LANGUAGE sql STABLE;
+```
+
+## Audit Pattern
+
+Key events:
+```sql
+INSERT INTO audit_log (event_type, event_data) 
+VALUES (
+    'key_created',
+    jsonb_build_object(
+        'key_id', key_id,
+        'key_prefix', key_prefix,
+        'scope', scope,
+        'created_by', current_user_id()
+    )
+);
+```
+
+Usage tracking:
+```sql
+CREATE MATERIALIZED VIEW key_usage_stats AS
+SELECT 
+    key_id,
+    date_trunc('hour', created_at) as hour,
+    count(*) as requests,
+    count(*) FILTER (
+        WHERE success = false
+    ) as failed_requests
+FROM request_log
+WHERE created_at > now() - interval '30 days'
+GROUP BY key_id, date_trunc('hour', created_at);
+
+REFRESH MATERIALIZED VIEW CONCURRENTLY key_usage_stats;
+```
+
+## See Also
+
+- [create_api_key()](../api/functions/create_api_key.md)
+- [verify_api_key()](../api/functions/verify_api_key.md)
+- [rotate_api_key()](../api/functions/rotate_api_key.md)
