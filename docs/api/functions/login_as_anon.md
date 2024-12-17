@@ -1,155 +1,158 @@
 # login_as_anon
 
-Impersonates an anonymous user for testing public access.
+Set the current database session to anonymous context.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo_impersonation.login_as_anon()
-RETURNS void
+keyhippo.login_as_anon() RETURNS jsonb
 ```
 
-## Security
+## Description
 
-- SECURITY INVOKER procedure
-- Requires postgres role
-- Session timeout enforced
-- Audit logged
+`login_as_anon` sets minimal anonymous access by:
+1. Clearing existing session context
+2. Setting anonymous role
+3. Applying anonymous RLS policies
+4. Recording transition in audit log
 
-## Example Usage
+## Return Value
 
-### Basic Anonymous Access
+Returns anonymous context JSONB:
+```json
+{
+    "type": "anon",
+    "roles": ["anon"],
+    "metadata": {
+        "previous_context": "api_key|user|impersonation",
+        "started_at": "2024-01-01T00:00:00Z"
+    }
+}
+```
+
+## Examples
+
+Switch to anonymous:
 ```sql
-CALL keyhippo_impersonation.login_as_anon();
+SELECT login_as_anon();
 ```
 
-### Testing Public Access
-```sql
-DO $$
-BEGIN
-    -- Start anonymous session
-    CALL keyhippo_impersonation.login_as_anon();
-    
-    -- Test public access
-    ASSERT EXISTS (
-        SELECT 1 FROM public.resources
-        WHERE is_public = true
-    );
-    
-    -- End session
-    CALL keyhippo_impersonation.logout();
-END $$;
-```
-
-### With Error Handling
+Anonymous operation block:
 ```sql
 DO $$
 BEGIN
-    -- Start anonymous session
-    CALL keyhippo_impersonation.login_as_anon();
+    -- Switch to anonymous
+    PERFORM login_as_anon();
     
-    -- Set timeout handler
-    PERFORM set_config(
-        'session.impersonation_expires',
-        (NOW() + INTERVAL '1 hour')::text,
-        TRUE
+    -- Public data access
+    PERFORM public_operation();
+    
+    -- Restore original context
+    PERFORM logout();
+END;
+$$;
+```
+
+Check anonymous access:
+```sql
+SELECT EXISTS (
+    SELECT 1 FROM items
+    WHERE public = true
+    AND keyhippo.login_as_anon() IS NOT NULL
+) as has_public_access;
+```
+
+## Implementation
+
+Session variable setup:
+```sql
+-- Clear existing context
+RESET keyhippo.current_context;
+RESET keyhippo.current_user_id;
+RESET keyhippo.current_tenant_id;
+RESET keyhippo.current_roles;
+
+-- Set anonymous context
+SET LOCAL keyhippo.current_context = '{"type": "anon", "roles": ["anon"]}';
+SET LOCAL keyhippo.current_roles = '{anon}';
+```
+
+## Error Cases
+
+Already anonymous:
+```sql
+SELECT login_as_anon();
+ERROR:  already in anonymous context
+DETAIL:  Call logout() first to change context
+```
+
+Permission denied:
+```sql
+SELECT login_as_anon();
+ERROR:  permission denied
+DETAIL:  Current user cannot switch to anonymous context
+HINT:   Requires 'use_anon_context' permission
+```
+
+## Permissions Required
+
+Caller must have either:
+- 'use_anon_context' permission
+- No active context
+
+## Anonymous Policies
+
+Default RLS policies for anonymous:
+
+```sql
+-- Public data access
+CREATE POLICY anon_read ON items
+    FOR SELECT
+    USING (
+        public = true
+        AND current_user_context()->>'type' = 'anon'
     );
-    
-EXCEPTION
-    WHEN OTHERS THEN
-        -- Ensure logout
-        CALL keyhippo_impersonation.logout();
-        RAISE;
-END $$;
+
+-- Rate limiting
+CREATE POLICY anon_rate_limit ON api_requests
+    FOR INSERT
+    USING (
+        current_user_context()->>'type' = 'anon'
+        AND NOT EXISTS (
+            SELECT 1 FROM api_requests
+            WHERE client_ip = current_client_ip()
+            AND created_at > now() - interval '1 minute'
+            GROUP BY client_ip
+            HAVING count(*) > 60
+        )
+    );
 ```
 
-## Implementation Notes
+## Audit Trail
 
-1. **Session Setup**
+Creates audit entries:
 ```sql
--- Set JWT claims
-PERFORM set_config('request.jwt.claim.sub', 'anon', TRUE);
-PERFORM set_config('request.jwt.claim.role', 'anon', TRUE);
-PERFORM set_config('request.jwt.claims', '{"role": "anon"}', TRUE);
-```
+-- Start anonymous context
+INSERT INTO audit_log (event_type, event_data) VALUES (
+    'anon_context_start',
+    '{
+        "previous_context": "api_key",
+        "client_ip": "10.0.0.1"
+    }'
+);
 
-2. **State Tracking**
-```sql
-INSERT INTO keyhippo_impersonation.impersonation_state (
-    impersonated_user_id,
-    original_role
-)
-VALUES (
-    '00000000-0000-0000-0000-000000000000'::uuid,
-    CURRENT_ROLE
+-- End anonymous context
+INSERT INTO audit_log (event_type, event_data) VALUES (
+    'anon_context_end',
+    '{
+        "duration": "PT5M",
+        "operations": ["SELECT"]
+    }'
 );
 ```
-
-3. **Session Timeout**
-```sql
-PERFORM set_config(
-    'session.impersonation_expires',
-    (NOW() + INTERVAL '1 hour')::text,
-    TRUE
-);
-```
-
-## Error Handling
-
-1. **Unauthorized**
-```sql
--- Raises exception if not postgres role
-CALL keyhippo_impersonation.login_as_anon();
-```
-
-2. **Already Impersonating**
-```sql
--- Raises exception
--- Must logout first
-CALL keyhippo_impersonation.login_as_anon();
-```
-
-## Security Considerations
-
-1. **Access Control**
-   - Only postgres role can impersonate
-   - All actions are audit logged
-   - Session timeout enforced
-   - Original role preserved
-
-2. **Session Management**
-   ```sql
-   -- Check timeout
-   SELECT current_setting(
-       'session.impersonation_expires',
-       TRUE
-   )::timestamptz > NOW();
-   ```
-
-3. **Audit Trail**
-   ```sql
-   -- Track impersonation
-   INSERT INTO keyhippo.audit_log (
-       action,
-       data
-   )
-   VALUES (
-       'anon_impersonation_start',
-       jsonb_build_object(
-           'original_role', original_role,
-           'timestamp', NOW()
-       )
-   );
-   ```
-
-## Related Functions
-
-- [login_as_user()](login_as_user.md)
-- [logout()](logout.md)
-- [current_user_context()](current_user_context.md)
 
 ## See Also
 
-- [Impersonation State](../tables/impersonation_state.md)
-- [Security Best Practices](../security/rls_policies.md)
-- [Audit Log](../tables/audit_log.md)
+- [logout()](logout.md) - Clear context
+- [login_as_user()](login_as_user.md) - User context
+- [current_user_context()](current_user_context.md) - Get context

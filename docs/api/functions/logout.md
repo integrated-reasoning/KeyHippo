@@ -1,144 +1,149 @@
 # logout
 
-Ends an impersonation session and restores original role.
+Reset the current database session's authentication context.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo_impersonation.logout()
-RETURNS void
+keyhippo.logout() RETURNS void
 ```
 
-## Security
+## Description
 
-- SECURITY INVOKER procedure
-- Safe for all roles
-- Cleans up session state
-- Audit logged
+`logout` clears all authentication context by:
+1. Recording context termination in audit log
+2. Resetting all session variables
+3. Clearing cached permissions
 
-## Example Usage
+## Examples
 
-### Basic Logout
+Basic logout:
 ```sql
-CALL keyhippo_impersonation.logout();
+SELECT logout();
 ```
 
-### Complete Session
+Scoped impersonation:
 ```sql
 DO $$
 BEGIN
-    -- Start impersonation
-    CALL keyhippo_impersonation.login_as_user('user_id_here');
+    -- Switch context
+    PERFORM login_as_user('550e8400-e29b-41d4-a716-446655440000');
     
-    -- Perform actions
-    -- ...
+    -- Do work
+    PERFORM some_operation();
     
-    -- End session
-    CALL keyhippo_impersonation.logout();
-END $$;
+    -- Reset context
+    PERFORM logout();
+END;
+$$;
 ```
 
-### With Error Handling
+Clear anonymous context:
 ```sql
 DO $$
 BEGIN
-    -- Start session
-    CALL keyhippo_impersonation.login_as_user('user_id_here');
-    
-    BEGIN
-        -- Perform actions
-        -- ...
-    EXCEPTION
-        WHEN OTHERS THEN
-            -- Always logout
-            CALL keyhippo_impersonation.logout();
-            RAISE;
-    END;
-    
-    -- Normal logout
-    CALL keyhippo_impersonation.logout();
-END $$;
+    PERFORM login_as_anon();
+    -- Public operations
+    PERFORM logout();
+END;
+$$;
 ```
 
-## Implementation Notes
+## Implementation
 
-1. **Session Cleanup**
+Session cleanup:
 ```sql
--- Clear JWT claims
-PERFORM set_config('request.jwt.claim.sub', '', TRUE);
-PERFORM set_config('request.jwt.claim.role', '', TRUE);
-PERFORM set_config('request.jwt.claims', '', TRUE);
-```
-
-2. **Role Reset**
-```sql
--- Restore original role
-EXECUTE FORMAT(
-    'SET ROLE %I',
-    original_role
+-- Record end of session
+INSERT INTO audit_log (
+    event_type,
+    event_data
+) VALUES (
+    CASE current_context_type()
+        WHEN 'impersonation' THEN 'impersonation_end'
+        WHEN 'api_key' THEN 'api_session_end'
+        WHEN 'anon' THEN 'anon_context_end'
+        ELSE 'session_end'
+    END,
+    build_session_end_data()
 );
+
+-- Clear all session state
+RESET keyhippo.current_context;
+RESET keyhippo.current_user_id;
+RESET keyhippo.current_tenant_id;
+RESET keyhippo.current_roles;
+RESET keyhippo.permission_cache;
 ```
 
-3. **State Cleanup**
+## Error Cases
+
+No active context:
 ```sql
--- Remove impersonation state
-DELETE FROM keyhippo_impersonation.impersonation_state
-WHERE original_role = 'postgres';
+SELECT logout();
+ERROR:  no active context
+DETAIL:  Nothing to logout from
 ```
 
-## Error Handling
-
-1. **Not Impersonating**
+Transaction error:
 ```sql
--- Raises exception
-CALL keyhippo_impersonation.logout();
+SELECT logout();
+ERROR:  could not reset session
+DETAIL:  Transaction rollback required
+HINT:   RESET cannot run inside transaction block
 ```
 
-2. **Session Expired**
+## Session Variables
+
+Cleared on logout:
 ```sql
--- Still performs cleanup
-CALL keyhippo_impersonation.logout();
+keyhippo.current_context    -- Full context JSON
+keyhippo.current_user_id    -- Active user ID
+keyhippo.current_tenant_id  -- Active tenant
+keyhippo.current_roles      -- Active roles
+keyhippo.permission_cache   -- Permission lookup cache
 ```
 
-## Security Considerations
+## Audit Trail
 
-1. **Session Cleanup**
-   - Removes all JWT claims
-   - Restores original role
-   - Clears session state
-   - Logs action
+Creates audit entry based on context type:
 
-2. **State Verification**
-   ```sql
-   -- Get original role
-   SELECT original_role::text
-   FROM keyhippo_impersonation.get_and_cleanup_impersonation();
-   ```
+API key session:
+```json
+{
+    "event_type": "api_session_end",
+    "event_data": {
+        "key_id": "550e8400-e29b-41d4-a716-446655440000",
+        "duration": "PT2H",
+        "operations": ["SELECT", "INSERT", "UPDATE"]
+    }
+}
+```
 
-3. **Audit Trail**
-   ```sql
-   -- Track logout
-   INSERT INTO keyhippo.audit_log (
-       action,
-       data
-   )
-   VALUES (
-       'impersonation_end',
-       jsonb_build_object(
-           'original_role', original_role,
-           'timestamp', NOW()
-       )
-   );
-   ```
+Impersonation:
+```json
+{
+    "event_type": "impersonation_end",
+    "event_data": {
+        "impersonator": "91c35b46-8c55-4264-8373-cf4b1ce957b9",
+        "target_user": "550e8400-e29b-41d4-a716-446655440000",
+        "duration": "PT5M"
+    }
+}
+```
 
-## Related Functions
-
-- [login_as_user()](login_as_user.md)
-- [login_as_anon()](login_as_anon.md)
-- [current_user_context()](current_user_context.md)
+Anonymous:
+```json
+{
+    "event_type": "anon_context_end",
+    "event_data": {
+        "client_ip": "10.0.0.1",
+        "requests": 45
+    }
+}
+```
 
 ## See Also
 
-- [Impersonation State](../tables/impersonation_state.md)
-- [Security Best Practices](../security/rls_policies.md)
-- [Audit Log](../tables/audit_log.md)
+- [login_as_user()](login_as_user.md) - Start impersonation
+- [login_as_anon()](login_as_anon.md) - Anonymous context
+- [current_user_context()](current_user_context.md) - Get current context
