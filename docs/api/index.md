@@ -1,93 +1,115 @@
-# KeyHippo API Documentation
+# KeyHippo API Reference
 
-## Table of Contents
+Complete reference documentation for KeyHippo's API.
 
-1. [Schemas](#schemas)
-2. [Tables](#tables)
-3. [Functions](#functions)
-4. [Triggers](#triggers)
-5. [Custom Types](#custom-types)
-6. [Permissions](#permissions)
-7. [Security](#security)
+## Core Concepts
 
-## Schemas
+KeyHippo is built around these key concepts:
 
-KeyHippo uses multiple schemas to organize its functionality:
+1. **API Keys**: Secure authentication tokens with optional claims
+2. **RBAC**: Role-based access control with groups and permissions
+3. **RLS Integration**: Native PostgreSQL row-level security
+4. **Multi-Tenant**: Built-in support for tenant isolation
 
-- [`keyhippo`](schemas/keyhippo.md) - Main schema for API key and scope management
-- [`keyhippo_internal`](schemas/keyhippo_internal.md) - Internal configuration and utilities
-- [`keyhippo_rbac`](schemas/keyhippo_rbac.md) - Role-Based Access Control functionality
-- [`keyhippo_impersonation`](schemas/keyhippo_impersonation.md) - User impersonation capabilities
+## API Components
 
-## Tables
+### Authentication
 
-### KeyHippo Schema
-- [`api_key_metadata`](tables/api_key_metadata.md) - Stores API key metadata
-- [`api_key_secrets`](tables/api_key_secrets.md) - Securely stores API key hashes
-- [`scopes`](tables/scopes.md) - Defines available API key scopes
-- [`scope_permissions`](tables/scope_permissions.md) - Maps scopes to permissions
-- [`audit_log`](tables/audit_log.md) - Audit trail for system actions
+#### API Key Management
+- [`create_api_key()`](functions/create_api_key.md) - Create API keys
+- [`verify_api_key()`](functions/verify_api_key.md) - Validate keys
+- [`revoke_api_key()`](functions/revoke_api_key.md) - Revoke keys
+- [`rotate_api_key()`](functions/rotate_api_key.md) - Rotate keys
 
-### RBAC Schema
-- [`groups`](tables/groups.md) - User groups for organization
-- [`roles`](tables/roles.md) - Roles within groups
+#### Context & Authorization
+- [`current_user_context()`](functions/current_user_context.md) - Get auth context
+- [`authorize()`](functions/authorize.md) - Check permissions
+- [`key_data()`](functions/key_data.md) - Get key metadata
+
+### Access Control
+
+#### RBAC Management
+- [`create_group()`](functions/create_group.md) - Create groups
+- [`create_role()`](functions/create_role.md) - Create roles
+- [`assign_role_to_user()`](functions/assign_role_to_user.md) - Role assignment
+- [`assign_permission_to_role()`](functions/assign_permission_to_role.md) - Permission assignment
+
+#### Administrative
+- [`login_as_user()`](functions/login_as_user.md) - User impersonation
+- [`login_as_anon()`](functions/login_as_anon.md) - Anonymous access
+- [`logout()`](functions/logout.md) - End impersonation
+
+### System Management
+
+#### Setup
+- [`initialize_keyhippo()`](functions/initialize_keyhippo.md) - Initial setup
+- [`initialize_existing_project()`](functions/initialize_existing_project.md) - Existing project setup
+
+#### Maintenance
+- [`check_request()`](functions/check_request.md) - Request validation
+- [`update_expiring_keys()`](functions/update_expiring_keys.md) - Key expiration
+
+## Database Schema
+
+### Core Schema (`keyhippo`)
+- [`api_key_metadata`](tables/api_key_metadata.md) - Key metadata
+- [`api_key_secrets`](tables/api_key_secrets.md) - Secure hashes
+- [`scopes`](tables/scopes.md) - API scopes
+- [`audit_log`](tables/audit_log.md) - Audit trail
+
+### RBAC Schema (`keyhippo_rbac`)
+- [`groups`](tables/groups.md) - User groups
+- [`roles`](tables/roles.md) - User roles
 - [`permissions`](tables/permissions.md) - Available permissions
-- [`role_permissions`](tables/role_permissions.md) - Maps roles to permissions
-- [`user_group_roles`](tables/user_group_roles.md) - User assignments to groups and roles
+- [`role_permissions`](tables/role_permissions.md) - Role-permission mapping
+- [`user_group_roles`](tables/user_group_roles.md) - User-role assignment
 
-### Internal Schema
+### Internal Schema (`keyhippo_internal`)
 - [`config`](tables/config.md) - System configuration
 
-### Impersonation Schema
-- [`impersonation_state`](tables/impersonation_state.md) - Tracks active impersonation sessions
+## Security
 
-## Functions
+- [RLS Policies](security/rls_policies.md) - Access control policies
+- [Function Security](security/function_security.md) - Function permissions
+- [Grants](security/grants.md) - Database grants
 
-### API Key Management
-- [`create_api_key()`](functions/create_api_key.md) - Create new API keys
-- [`verify_api_key()`](functions/verify_api_key.md) - Validate API keys
-- [`revoke_api_key()`](functions/revoke_api_key.md) - Revoke API keys
-- [`rotate_api_key()`](functions/rotate_api_key.md) - Rotate existing API keys
-- [`update_key_claims()`](functions/update_key_claims.md) - Update API key claims
-- [`key_data()`](functions/key_data.md) - Retrieve API key metadata
+## Best Practices
 
-### Authentication & Authorization
-- [`current_user_context()`](functions/current_user_context.md) - Get current user context
-- [`authorize()`](functions/authorize.md) - Check permission authorization
-- [`is_authorized()`](functions/is_authorized.md) - Check resource authorization
+- Always use `current_user_context()` in RLS policies
+- Never store API keys in plaintext
+- Use claims for tenant isolation
+- Implement proper key rotation
+- Monitor the audit log
 
-### RBAC Management
-- [`create_group()`](functions/create_group.md) - Create user groups
-- [`create_role()`](functions/create_role.md) - Create roles
-- [`assign_role_to_user()`](functions/assign_role_to_user.md) - Assign roles to users
-- [`assign_permission_to_role()`](functions/assign_permission_to_role.md) - Assign permissions to roles
+## Error Handling
 
-### Impersonation
-- [`login_as_user()`](functions/login_as_user.md) - Impersonate a user
-- [`login_as_anon()`](functions/login_as_anon.md) - Impersonate anonymous user
-- [`logout()`](functions/logout.md) - End impersonation session
+All functions follow these error patterns:
 
-### System Functions
-- [`initialize_keyhippo()`](functions/initialize_keyhippo.md) - Initialize the system
-- [`initialize_existing_project()`](functions/initialize_existing_project.md) - Set up existing project
-- [`check_request()`](functions/check_request.md) - PreRequest security check
-- [`update_expiring_keys()`](functions/update_expiring_keys.md) - Handle key expiration
+1. **Authentication Errors**
+   - Invalid API key
+   - Expired key
+   - Missing permissions
 
-## Triggers
+2. **Authorization Errors**
+   - Insufficient privileges
+   - Invalid tenant access
+   - Role conflicts
 
-- [`keyhippo_audit_rbac_groups`](triggers/audit_triggers.md) - Audit group changes
-- [`keyhippo_audit_rbac_roles`](triggers/audit_triggers.md) - Audit role changes
-- [`keyhippo_audit_rbac_permissions`](triggers/audit_triggers.md) - Audit permission changes
-- [`keyhippo_notify_expiring_key_trigger`](triggers/notify_triggers.md) - Key expiration notifications
-- [`keyhippo_assign_default_role_trigger`](triggers/role_triggers.md) - Default role assignment
+3. **Validation Errors**
+   - Invalid input format
+   - Missing required fields
+   - Constraint violations
 
-## Custom Types
+## Performance Considerations
 
-- [`app_permission`](types/app_permission.md) - System permission enum
-- [`app_role`](types/app_role.md) - System role types
+- Use appropriate indexes
+- Cache frequent lookups
+- Batch operations when possible
+- Monitor query performance
 
-## Permissions
+## Related Guides
 
-- [Row Level Security Policies](security/rls_policies.md) - Table access policies
-- [Grants](security/grants.md) - Role-based privileges
-- [Function Security](security/function_security.md) - Function execution permissions
+- [QuickStart Guide](../guides/quickstart.md)
+- [Enterprise Setup](../guides/enterprise_quickstart.md)
+- [Multi-Tenant Guide](../guides/multi_tenant.md)
+- [API Key Patterns](../guides/api_key_patterns.md)
