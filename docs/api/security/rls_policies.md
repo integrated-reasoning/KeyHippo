@@ -1,176 +1,285 @@
 # Row Level Security Policies
 
-KeyHippo uses Postgres Row Level Security (RLS) to enforce access control at the database level. This document details all RLS policies in the system.
+RLS implementation for KeyHippo tables.
 
-## Overview
+## Policy Types
 
-RLS policies are enabled on all tables across KeyHippo's schemas. These policies ensure that:
-- Users can only access their own data
-- Administrators can access data based on their permissions
-- API keys can only access allowed resources
-- System tables are protected from unauthorized access
+### User Context Policies
 
-## KeyHippo Schema Policies
-
-### api_key_metadata
-
+Basic user access:
 ```sql
-CREATE POLICY api_key_metadata_access_policy ON keyhippo.api_key_metadata
-    FOR ALL TO authenticated
+-- Owner access
+CREATE POLICY user_resources ON resources
+    FOR ALL
     USING (
-        user_id = auth.uid()
-        OR keyhippo.authorize('manage_api_keys')
+        owner_id = (current_user_context()->>'user_id')::uuid
     );
-```
 
-Users can only see and manage their own API keys, while administrators with 'manage_api_keys' permission can see all keys.
-
-### api_key_secrets
-
-```sql
-CREATE POLICY api_key_secrets_no_access_policy ON keyhippo.api_key_secrets
-    FOR ALL TO authenticated
-    USING (FALSE);
-```
-
-No direct access allowed to API key secrets - all interactions must be through secure functions.
-
-### scopes
-
-```sql
-CREATE POLICY scopes_access_policy ON keyhippo.scopes
-    FOR ALL TO authenticated
-    USING (keyhippo.authorize('manage_scopes'))
-    WITH CHECK (keyhippo.authorize('manage_scopes'));
-```
-
-Only users with 'manage_scopes' permission can manage scopes.
-
-## RBAC Schema Policies
-
-### groups
-
-```sql
-CREATE POLICY groups_access_policy ON keyhippo_rbac.groups
-    FOR ALL TO authenticated
-    USING (keyhippo.authorize('manage_groups'))
-    WITH CHECK (keyhippo.authorize('manage_groups'));
-```
-
-Only users with 'manage_groups' permission can manage groups.
-
-### roles
-
-```sql
-CREATE POLICY roles_access_policy ON keyhippo_rbac.roles
-    FOR ALL TO authenticated
-    USING (keyhippo.authorize('manage_roles'))
-    WITH CHECK (keyhippo.authorize('manage_roles'));
-```
-
-Only users with 'manage_roles' permission can manage roles.
-
-### permissions
-
-```sql
-CREATE POLICY permissions_access_policy ON keyhippo_rbac.permissions
-    FOR ALL TO authenticated
-    USING (keyhippo.authorize('manage_permissions'))
-    WITH CHECK (keyhippo.authorize('manage_permissions'));
-```
-
-Only users with 'manage_permissions' permission can manage permissions.
-
-### user_group_roles
-
-```sql
-CREATE POLICY user_group_roles_access_policy ON keyhippo_rbac.user_group_roles
-    FOR ALL TO authenticated
-    USING (keyhippo.authorize('manage_roles'))
-    WITH CHECK (keyhippo.authorize('manage_roles'));
-```
-
-Only users with 'manage_roles' permission can manage user role assignments.
-
-## Internal Schema Policies
-
-### config
-
-```sql
-CREATE POLICY config_access_policy ON keyhippo_internal.config
-    USING (CURRENT_USER = 'postgres');
-```
-
-Only the postgres superuser can access internal configuration.
-
-## Impersonation Schema Policies
-
-### impersonation_state
-
-```sql
-CREATE POLICY impersonation_state_access ON keyhippo_impersonation.impersonation_state
+-- Group member access
+CREATE POLICY group_resources ON resources
+    FOR ALL
     USING (
-        CURRENT_USER = 'postgres'
-        OR (
-            CURRENT_USER = 'anon' 
-            AND impersonated_user_id = '00000000-0000-0000-0000-000000000000'::uuid
+        group_id IN (
+            SELECT group_id 
+            FROM user_group_roles 
+            WHERE user_id = (current_user_context()->>'user_id')::uuid
         )
-        OR impersonated_user_id::text = CURRENT_USER
     );
 ```
 
-Restricts access to impersonation state based on user roles and impersonation status.
+### Tenant Isolation
 
-## Best Practices
-
-When implementing custom tables that integrate with KeyHippo:
-
-1. Always enable RLS:
+Multi-tenant separation:
 ```sql
-ALTER TABLE your_table ENABLE ROW LEVEL SECURITY;
-```
-
-2. Use KeyHippo's authorization function:
-```sql
-CREATE POLICY your_policy ON your_table
-    FOR ALL TO authenticated
-    USING (keyhippo.authorize('your_permission'));
-```
-
-3. Consider user context:
-```sql
-CREATE POLICY your_user_policy ON your_table
-    FOR ALL TO authenticated
+-- Tenant resources
+CREATE POLICY tenant_isolation ON resources
+    FOR ALL
     USING (
-        user_id = (SELECT user_id FROM keyhippo.current_user_context())
+        tenant_id = (current_user_context()->>'tenant_id')::uuid
+    );
+
+-- Cross-tenant access
+CREATE POLICY tenant_sharing ON resources
+    FOR SELECT
+    USING (
+        tenant_id = (current_user_context()->>'tenant_id')::uuid
+        OR shared_with @> ARRAY[
+            (current_user_context()->>'tenant_id')::uuid
+        ]
     );
 ```
 
-4. Handle API key scopes:
+### Role-Based Access
+
+Permission checks:
 ```sql
-CREATE POLICY your_scope_policy ON your_table
-    FOR ALL TO authenticated
+-- Role-specific access
+CREATE POLICY role_access ON resources
+    FOR ALL
     USING (
         EXISTS (
             SELECT 1 
-            FROM keyhippo.current_user_context() ctx
-            WHERE ctx.scope_id = your_table.scope_id
+            FROM user_group_roles ugr
+            JOIN role_permissions rp ON rp.role_id = ugr.role_id
+            WHERE ugr.user_id = (current_user_context()->>'user_id')::uuid
+            AND rp.permission = 'manage_resources'
+        )
+    );
+
+-- Hierarchical access
+CREATE POLICY role_hierarchy ON resources
+    FOR ALL
+    USING (
+        EXISTS (
+            WITH RECURSIVE role_tree AS (
+                -- Direct roles
+                SELECT role_id, permission_id
+                FROM user_group_roles ugr
+                WHERE user_id = (current_user_context()->>'user_id')::uuid
+                
+                UNION
+                
+                -- Inherited roles
+                SELECT ri.child_role_id, rp.permission_id
+                FROM role_tree rt
+                JOIN role_inheritance ri ON ri.parent_role_id = rt.role_id
+                JOIN role_permissions rp ON rp.role_id = ri.child_role_id
+            )
+            SELECT 1 
+            FROM role_tree rt
+            JOIN role_permissions rp ON rp.role_id = rt.role_id
+            WHERE rp.permission = 'manage_resources'
         )
     );
 ```
 
-## Security Considerations
+## Implementation Examples
 
-- All tables have RLS enabled by default
-- Policies are enforced even for superusers
-- Function security contexts are carefully managed
-- API key access is always verified through secure functions
-- Audit logging captures all relevant changes
-- Impersonation is strictly controlled
+### API Key Management
 
-## Related Documentation
+```sql
+-- Key metadata access
+CREATE POLICY key_access ON api_key_metadata
+    FOR ALL
+    USING (
+        -- Own keys
+        user_id = (current_user_context()->>'user_id')::uuid
+        
+        OR
+        
+        -- Admin access
+        (
+            SELECT has_permission('manage_keys')
+            AND tenant_id = (current_user_context()->>'tenant_id')::uuid
+        )
+    );
+
+-- Key secret access
+CREATE POLICY key_secret_access ON api_key_secrets
+    FOR SELECT
+    USING (
+        key_id IN (
+            SELECT key_id 
+            FROM api_key_metadata
+            WHERE user_id = (current_user_context()->>'user_id')::uuid
+        )
+    );
+```
+
+### Group Management
+
+```sql
+-- Group access
+CREATE POLICY group_access ON groups
+    FOR SELECT
+    USING (
+        tenant_id = (current_user_context()->>'tenant_id')::uuid
+        OR tenant_id IS NULL
+    )
+    WITH CHECK (
+        has_permission('manage_groups')
+        AND tenant_id = (current_user_context()->>'tenant_id')::uuid
+    );
+
+-- Group role management
+CREATE POLICY group_roles ON user_group_roles
+    FOR ALL
+    USING (
+        (
+            -- Own roles
+            user_id = (current_user_context()->>'user_id')::uuid
+        )
+        OR
+        (
+            -- Group admin
+            group_id IN (
+                SELECT group_id 
+                FROM group_admins 
+                WHERE user_id = (current_user_context()->>'user_id')::uuid
+            )
+        )
+    );
+```
+
+### Audit Log Access
+
+```sql
+-- Audit log visibility
+CREATE POLICY audit_access ON audit_log
+    FOR SELECT
+    USING (
+        -- Own events
+        user_id = (current_user_context()->>'user_id')::uuid
+        
+        OR
+        
+        -- Tenant auditor
+        (
+            has_permission('view_audit_log')
+            AND tenant_id = (current_user_context()->>'tenant_id')::uuid
+        )
+        
+        OR
+        
+        -- System auditor
+        has_permission('view_all_audit_logs')
+    );
+```
+
+## Performance Optimization
+
+Index support:
+```sql
+-- User lookup
+CREATE INDEX idx_resource_owner 
+ON resources(owner_id)
+INCLUDE (tenant_id);
+
+-- Tenant lookup
+CREATE INDEX idx_resource_tenant 
+ON resources(tenant_id)
+INCLUDE (owner_id);
+
+-- Group membership
+CREATE INDEX idx_user_groups 
+ON user_group_roles(user_id)
+INCLUDE (group_id);
+```
+
+Permission caching:
+```sql
+-- Cache table
+CREATE UNLOGGED TABLE permission_cache (
+    user_id uuid,
+    permission text,
+    has_access boolean,
+    cached_at timestamptz,
+    PRIMARY KEY (user_id, permission)
+);
+
+-- Cache usage
+CREATE POLICY permission_check ON resources
+    FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1 
+            FROM permission_cache
+            WHERE user_id = (current_user_context()->>'user_id')::uuid
+            AND permission = 'manage_resources'
+            AND has_access = true
+            AND cached_at > now() - interval '5 minutes'
+        )
+    );
+```
+
+## Common Patterns
+
+Hierarchical access:
+```sql
+-- Resource hierarchy
+CREATE POLICY hierarchy_access ON resources
+    USING (
+        WITH RECURSIVE resource_tree AS (
+            -- Base resources
+            SELECT id, parent_id
+            FROM resources
+            WHERE owner_id = (current_user_context()->>'user_id')::uuid
+            
+            UNION
+            
+            -- Child resources
+            SELECT r.id, r.parent_id
+            FROM resources r
+            JOIN resource_tree rt ON rt.id = r.parent_id
+        )
+        SELECT EXISTS (
+            SELECT 1 FROM resource_tree 
+            WHERE id = resources.id
+        )
+    );
+```
+
+Time-based access:
+```sql
+-- Time window
+CREATE POLICY time_access ON resources
+    FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1
+            FROM user_group_roles ugr
+            JOIN role_permissions rp ON rp.role_id = ugr.role_id
+            WHERE ugr.user_id = (current_user_context()->>'user_id')::uuid
+            AND rp.permission = 'access_resources'
+            AND (
+                rp.conditions->>'time_start')::time <= current_time
+                AND (rp.conditions->>'time_end')::time >= current_time
+            )
+    );
+```
+
+## See Also
 
 - [Function Security](function_security.md)
-- [Grants](grants.md)
-- [Authorization Function](../functions/authorize.md)
-- [Current User Context](../functions/current_user_context.md)
+- [Database Grants](grants.md)
+- [current_user_context()](../functions/current_user_context.md)

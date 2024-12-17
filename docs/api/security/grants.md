@@ -1,157 +1,226 @@
-# Grants
+# Database Grants
 
-Permission grants and role assignments in KeyHippo.
+Privilege management for KeyHippo objects.
 
-## Schema Access
+## Role Hierarchy
 
-### Public Access
 ```sql
--- Schema usage
-GRANT USAGE ON SCHEMA keyhippo TO authenticated, anon;
-GRANT USAGE ON SCHEMA keyhippo_rbac TO authenticated, anon;
+-- System roles
+CREATE ROLE keyhippo_system NOINHERIT;
+CREATE ROLE keyhippo_api NOINHERIT;
+CREATE ROLE keyhippo_readonly NOINHERIT;
+
+-- Application roles
+CREATE ROLE app_authenticator NOINHERIT;
+CREATE ROLE app_user;
+CREATE ROLE app_admin;
+
+-- Service roles
+CREATE ROLE analytics_service NOINHERIT;
+CREATE ROLE backup_service NOINHERIT;
 ```
 
-### Internal Access
+## Schema Grants
+
+Core Schema:
 ```sql
--- Internal schema
-GRANT USAGE ON SCHEMA keyhippo_internal TO postgres;
-GRANT ALL PRIVILEGES ON keyhippo_internal.config TO postgres;
+-- System access
+GRANT USAGE ON SCHEMA keyhippo TO keyhippo_system;
+GRANT USAGE ON SCHEMA keyhippo_internal TO keyhippo_system;
+
+-- API access
+GRANT USAGE ON SCHEMA keyhippo TO keyhippo_api;
+GRANT USAGE ON SCHEMA keyhippo_public TO PUBLIC;
+
+-- Application access
+GRANT USAGE ON SCHEMA keyhippo TO app_authenticator;
+GRANT USAGE ON SCHEMA keyhippo_public TO app_user;
 ```
 
-## Function Execution
-
-### API Key Functions
+RBAC Schema:
 ```sql
--- Core API key management
-GRANT EXECUTE ON FUNCTION keyhippo.create_api_key(text, text) TO authenticated;
-GRANT EXECUTE ON FUNCTION keyhippo.verify_api_key(text) TO authenticated;
-GRANT EXECUTE ON FUNCTION keyhippo.revoke_api_key(uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION keyhippo.rotate_api_key(uuid) TO authenticated;
+-- Admin access
+GRANT USAGE ON SCHEMA keyhippo_rbac TO keyhippo_system;
+GRANT USAGE ON SCHEMA keyhippo_rbac TO app_admin;
+
+-- Read access
+GRANT USAGE ON SCHEMA keyhippo_rbac TO keyhippo_readonly;
+GRANT USAGE ON SCHEMA keyhippo_rbac TO app_user;
 ```
 
-### RBAC Functions
+## Table Grants
+
+API Keys:
+```sql
+-- Metadata access
+GRANT SELECT, INSERT ON keyhippo.api_key_metadata 
+TO keyhippo_api;
+
+GRANT SELECT ON keyhippo.api_key_metadata 
+TO keyhippo_readonly;
+
+-- Secret access
+GRANT INSERT ON keyhippo.api_key_secrets 
+TO keyhippo_system;
+
+GRANT SELECT ON keyhippo.api_key_secrets 
+TO keyhippo_api;
+```
+
+RBAC Tables:
 ```sql
 -- Role management
-GRANT EXECUTE ON FUNCTION keyhippo_rbac.create_group(text, text) TO authenticated;
-GRANT EXECUTE ON FUNCTION keyhippo_rbac.create_role(text, text, uuid, keyhippo.app_role) TO authenticated;
-GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_role_to_user(uuid, uuid, uuid) TO authenticated;
-GRANT EXECUTE ON FUNCTION keyhippo_rbac.assign_permission_to_role(uuid, keyhippo.app_permission) TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON keyhippo_rbac.roles 
+TO app_admin;
+
+GRANT SELECT ON keyhippo_rbac.roles 
+TO app_user;
+
+-- Permission management
+GRANT SELECT, INSERT, UPDATE ON keyhippo_rbac.permissions 
+TO app_admin;
+
+GRANT SELECT ON keyhippo_rbac.permissions 
+TO app_user;
 ```
 
-### System Functions
+Audit Log:
 ```sql
--- Core functionality
-GRANT EXECUTE ON FUNCTION keyhippo.authorize(keyhippo.app_permission) TO authenticated, anon;
-GRANT EXECUTE ON FUNCTION keyhippo.current_user_context() TO authenticated;
-GRANT EXECUTE ON FUNCTION keyhippo.key_data() TO authenticated, authenticator, anon;
+-- Write access
+GRANT INSERT ON keyhippo.audit_log 
+TO keyhippo_system;
+
+-- Read access
+GRANT SELECT ON keyhippo.audit_log 
+TO app_admin;
+
+GRANT SELECT ON keyhippo.audit_log 
+TO analytics_service;
 ```
 
-## Table Access
+## Function Grants
 
-### Public Tables
+Authentication:
 ```sql
--- Grant access to authenticated users
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo TO authenticated;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA keyhippo_rbac TO authenticated;
+-- Key management
+GRANT EXECUTE ON FUNCTION 
+    keyhippo.create_api_key(text),
+    keyhippo.verify_api_key(text),
+    keyhippo.revoke_api_key(uuid)
+TO keyhippo_api;
+
+-- Context management
+GRANT EXECUTE ON FUNCTION 
+    keyhippo.current_user_context(),
+    keyhippo.login_as_anon()
+TO PUBLIC;
+
+GRANT EXECUTE ON FUNCTION 
+    keyhippo.login_as_user(uuid)
+TO app_admin;
 ```
 
-### Protected Tables
+RBAC Functions:
 ```sql
--- Revoke sensitive access
-REVOKE ALL ON TABLE keyhippo.api_key_secrets FROM authenticated;
+-- Role management
+GRANT EXECUTE ON FUNCTION 
+    keyhippo.create_role(text, text),
+    keyhippo.assign_role_to_user(uuid, text)
+TO app_admin;
+
+-- Group management
+GRANT EXECUTE ON FUNCTION 
+    keyhippo.create_group(text),
+    keyhippo.add_user_to_group(uuid, uuid)
+TO app_admin;
 ```
 
-### Service Role Access
+System Functions:
 ```sql
--- Full access for service role
-GRANT ALL ON ALL TABLES IN SCHEMA keyhippo TO service_role;
-GRANT ALL ON ALL TABLES IN SCHEMA keyhippo_rbac TO service_role;
+-- Initialization
+GRANT EXECUTE ON FUNCTION 
+    keyhippo.initialize_keyhippo(),
+    keyhippo.update_schema_version()
+TO keyhippo_system;
+
+-- Maintenance
+GRANT EXECUTE ON FUNCTION 
+    keyhippo.rotate_expired_keys(),
+    keyhippo.cleanup_audit_log()
+TO keyhippo_system;
 ```
 
-## Role Assignments
+## Default Privileges
 
-### Base Roles
+New Objects:
 ```sql
--- Minimal permissions
-GRANT keyhippo_user TO authenticated;
+-- Future tables
+ALTER DEFAULT PRIVILEGES IN SCHEMA keyhippo
+    GRANT SELECT ON TABLES TO keyhippo_readonly;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA keyhippo_rbac
+    GRANT SELECT ON TABLES TO app_user;
+
+-- Future functions
+ALTER DEFAULT PRIVILEGES IN SCHEMA keyhippo
+    GRANT EXECUTE ON FUNCTIONS TO keyhippo_api;
 ```
 
-### Administrative Roles
+## Service Account Access
+
+Analytics Service:
 ```sql
--- Full permissions
-GRANT keyhippo_admin TO service_role;
+-- Schema access
+GRANT USAGE ON SCHEMA keyhippo TO analytics_service;
+GRANT USAGE ON SCHEMA keyhippo_rbac TO analytics_service;
+
+-- Table access
+GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo 
+TO analytics_service;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo_rbac 
+TO analytics_service;
+
+-- Function access
+GRANT EXECUTE ON FUNCTION 
+    keyhippo.get_usage_statistics(),
+    keyhippo.get_audit_events()
+TO analytics_service;
 ```
 
-## Permission Hierarchy
-
-1. **Anonymous Access**
-   - verify_api_key
-   - key_data
-   - authorize
-
-2. **Authenticated Access**
-   - create_api_key
-   - revoke_api_key
-   - rotate_api_key
-   - manage own resources
-
-3. **Administrative Access**
-   - manage_groups
-   - manage_roles
-   - manage_permissions
-   - impersonation
-
-## Implementation Examples
-
-### Custom Role Setup
+Backup Service:
 ```sql
--- Create custom role
-CREATE ROLE api_manager;
+-- Read access
+GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo 
+TO backup_service;
 
--- Grant permissions
-GRANT EXECUTE ON FUNCTION keyhippo.create_api_key(text, text) TO api_manager;
-GRANT EXECUTE ON FUNCTION keyhippo.revoke_api_key(uuid) TO api_manager;
-GRANT SELECT ON keyhippo.api_key_metadata TO api_manager;
+GRANT SELECT ON ALL TABLES IN SCHEMA keyhippo_rbac 
+TO backup_service;
+
+-- Write access
+GRANT INSERT ON keyhippo.backup_log 
+TO backup_service;
 ```
 
-### Function Grants
+## Revocation
+
+Remove Access:
 ```sql
--- Grant with specific signature
-GRANT EXECUTE ON FUNCTION function_name(param_type) TO role_name;
+-- Remove user access
+REVOKE app_user FROM user_role;
 
--- Grant all functions
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA schema_name TO role_name;
+-- Remove all access
+REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA keyhippo 
+FROM revoked_role;
+
+REVOKE ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA keyhippo 
+FROM revoked_role;
+
+REVOKE USAGE ON SCHEMA keyhippo FROM revoked_role;
 ```
 
-### Table Grants
-```sql
--- Specific permissions
-GRANT SELECT, INSERT ON table_name TO role_name;
-
--- Schema-wide grants
-GRANT USAGE ON SCHEMA schema_name TO role_name;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA schema_name TO role_name;
-```
-
-## Security Considerations
-
-1. **Least Privilege**
-   - Grant minimum required permissions
-   - Use specific grants over wildcards
-   - Regular permission audits
-
-2. **Role Separation**
-   - Clear role boundaries
-   - Function-specific permissions
-   - Protected system tables
-
-3. **Grant Management**
-   - Document all grants
-   - Review grant chains
-   - Remove unused grants
-
-## Related Documentation
+## See Also
 
 - [Function Security](function_security.md)
 - [RLS Policies](rls_policies.md)
-- [Security Best Practices](../../guides/api_key_patterns.md)
+- [Role Management](../functions/create_role.md)
