@@ -1,169 +1,249 @@
 # authorize
 
-Checks if the current user or API key has a specific permission.
+Check if current user has a specific permission.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo.authorize(requested_permission keyhippo.app_permission)
-RETURNS boolean
+keyhippo.authorize(
+    permission text,
+    resource_id uuid DEFAULT NULL,
+    options jsonb DEFAULT NULL
+) RETURNS boolean
 ```
+
+## Description
+
+`authorize` evaluates permission grants by checking:
+1. Direct role permissions
+2. Inherited role permissions
+3. Group-based permissions
+4. Permission conditions
+5. Resource-specific grants
 
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| requested_permission | keyhippo.app_permission | The permission to check for |
+| Name | Type | Description |
+|------|------|-------------|
+| permission | text | Permission to check |
+| resource_id | uuid | Optional specific resource |
+| options | jsonb | Check options |
 
-## Returns
+## Examples
 
-Returns `true` if the current context (user or API key) has the requested permission, `false` otherwise.
+Basic check:
+```sql
+SELECT authorize('read_data');
+```
 
-## Security
+Resource-specific:
+```sql
+SELECT authorize(
+    'modify_item', 
+    '550e8400-e29b-41d4-a716-446655440000'
+);
+```
 
-- SECURITY DEFINER function
-- STABLE function (safe for use in RLS)
-- Fixed search path for security
-- Returns false on any error
+With options:
+```sql
+SELECT authorize(
+    'api_access',
+    options := '{
+        "require_mfa": true,
+        "check_ip": true
+    }'
+);
+```
+
+In RLS policy:
+```sql
+CREATE POLICY item_access ON items
+    FOR ALL
+    USING (
+        authorize('access_item', id)
+    );
+```
+
+## Implementation
+
+Permission resolution SQL:
+```sql
+WITH RECURSIVE role_perms AS (
+    -- Direct role permissions
+    SELECT 
+        p.name as permission,
+        rp.conditions
+    FROM user_group_roles ugr
+    JOIN role_permissions rp ON rp.role_id = ugr.role_id
+    JOIN permissions p ON p.permission_id = rp.permission_id
+    WHERE ugr.user_id = current_user_id()
+    AND (ugr.expires_at IS NULL OR ugr.expires_at > now())
+    
+    UNION
+    
+    -- Inherited permissions
+    SELECT 
+        p.name,
+        rp.conditions
+    FROM role_perms rp0
+    JOIN role_inheritance ri ON ri.parent_role_id = rp0.role_id
+    JOIN role_permissions rp ON rp.role_id = ri.child_role_id
+    JOIN permissions p ON p.permission_id = rp.permission_id
+)
+SELECT EXISTS (
+    SELECT 1 FROM role_perms
+    WHERE permission = $1
+    AND evaluate_conditions(conditions, $2, $3)
+);
+```
+
+Condition evaluation:
+```sql
+CREATE FUNCTION evaluate_conditions(
+    conditions jsonb,
+    resource_id uuid,
+    options jsonb
+) RETURNS boolean AS $$
+DECLARE
+    result boolean;
+BEGIN
+    -- Time window check
+    IF conditions ? 'time_window' THEN
+        IF NOT check_time_window(
+            (conditions->'time_window'->>'start')::time,
+            (conditions->'time_window'->>'end')::time,
+            (conditions->'time_window'->>'timezone')::text
+        ) THEN
+            RETURN false;
+        END IF;
+    END IF;
+
+    -- Resource ownership
+    IF conditions ? 'require_ownership' THEN
+        IF NOT check_resource_owner(
+            resource_id,
+            current_user_id()
+        ) THEN
+            RETURN false;
+        END IF;
+    END IF;
+
+    -- IP restrictions
+    IF conditions ? 'ip_ranges' THEN
+        IF NOT check_ip_range(
+            current_client_ip(),
+            conditions->'ip_ranges'
+        ) THEN
+            RETURN false;
+        END IF;
+    END IF;
+
+    RETURN true;
+END;
+$$ LANGUAGE plpgsql STABLE;
+```
+
+## Error Cases
+
+Invalid permission:
+```sql
+SELECT authorize('invalid');
+ERROR:  invalid permission
+DETAIL:  Permission "invalid" does not exist
+```
+
+Invalid resource:
+```sql
+SELECT authorize('read_item', 'invalid-uuid');
+ERROR:  invalid resource id
+DETAIL:  Resource with ID invalid-uuid not found
+```
+
+Invalid conditions:
+```sql
+SELECT authorize('api_access', options := '{"invalid": true}');
+ERROR:  invalid option
+DETAIL:  Option "invalid" not recognized
+```
+
+## Condition Types
+
+Time windows:
+```json
+{
+    "time_window": {
+        "start": "09:00",
+        "end": "17:00",
+        "timezone": "UTC",
+        "days": ["MON", "TUE", "WED", "THU", "FRI"]
+    }
+}
+```
+
+Resource limits:
+```json
+{
+    "max_resources": 100,
+    "resource_type": "api_key",
+    "action": "create"
+}
+```
+
+Network restrictions:
+```json
+{
+    "ip_ranges": [
+        "10.0.0.0/8",
+        "172.16.0.0/12"
+    ],
+    "require_vpn": true
+}
+```
+
+MFA requirements:
+```json
+{
+    "require_mfa": true,
+    "mfa_freshness": "1 hour",
+    "allowed_methods": ["totp", "webauthn"]
+}
+```
+
+## Caching
+
+Permission results are cached per transaction:
+```sql
+-- Cache structure
+keyhippo.permission_cache = {
+    "permission:resource": {
+        "result": true,
+        "evaluated_at": "timestamp",
+        "conditions_hash": "hash"
+    }
+}
+
+-- Cache invalidation
+AFTER UPDATE ON role_permissions
+AFTER UPDATE ON user_group_roles
+ON TRANSACTION COMMIT
+```
 
 ## Performance
 
-- P99 latency: 0.036ms
-- Operations/sec: 27,778 (single core)
-- Efficient permission lookup
-- Suitable for RLS policies
+Typical execution times:
+- Cached result: < 0.1ms
+- Direct permission: < 1ms
+- Inherited permission: < 5ms
+- With condition evaluation: 1-10ms
 
-## Example Usage
-
-### In RLS Policy
+Use `EXPLAIN ANALYZE` to debug slow checks:
 ```sql
-CREATE POLICY "resource_access" ON resources
-    FOR ALL
-    USING (keyhippo.authorize('manage_resources'));
+EXPLAIN ANALYZE
+SELECT authorize('complex_permission', complex_resource_id);
 ```
-
-### Multiple Permissions
-```sql
-CREATE POLICY "admin_access" ON sensitive_data
-    FOR ALL
-    USING (
-        keyhippo.authorize('admin_read')
-        AND keyhippo.authorize('admin_write')
-    );
-```
-
-### With User Check
-```sql
-CREATE POLICY "owner_or_admin" ON documents
-    FOR ALL
-    USING (
-        owner_id = auth.uid()
-        OR keyhippo.authorize('admin_access')
-    );
-```
-
-## Implementation Examples
-
-### Basic Permission Check
-```sql
--- Check single permission
-SELECT keyhippo.authorize('manage_users');
-
--- Check in procedure
-CREATE OR REPLACE PROCEDURE update_user_data()
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF NOT keyhippo.authorize('manage_users') THEN
-        RAISE EXCEPTION 'Unauthorized';
-    END IF;
-    -- Proceed with update
-END;
-$$;
-```
-
-### Complex Authorization
-```sql
-CREATE OR REPLACE FUNCTION can_access_resource(resource_id uuid)
-RETURNS boolean
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    -- Check basic access
-    IF NOT keyhippo.authorize('read_resources') THEN
-        RETURN false;
-    END IF;
-
-    -- Check specific permissions
-    RETURN (
-        -- Owner can always access
-        EXISTS (
-            SELECT 1 FROM resources 
-            WHERE id = resource_id 
-            AND owner_id = auth.uid()
-        )
-        OR
-        -- Admins can access all resources
-        keyhippo.authorize('admin_access')
-        OR
-        -- Users with explicit grant
-        EXISTS (
-            SELECT 1 FROM resource_grants
-            WHERE resource_id = $1
-            AND user_id = auth.uid()
-        )
-    );
-END;
-$$;
-```
-
-## Error Handling
-
-1. **Invalid Permissions**
-```sql
--- Returns false for non-existent permissions
-SELECT keyhippo.authorize('invalid_permission');
-```
-
-2. **No Authentication**
-```sql
--- Returns false when no user/key context
-SELECT keyhippo.authorize('any_permission');
-```
-
-## Implementation Notes
-
-1. **Permission Resolution**
-   - Checks both user and API key permissions
-   - Resolves through RBAC system
-   - Handles API key scopes
-
-2. **Performance Optimization**
-   ```sql
-   -- Cache frequent permission checks
-   CREATE MATERIALIZED VIEW user_permissions AS
-   SELECT 
-       user_id,
-       array_agg(DISTINCT p.name) as permissions
-   FROM keyhippo_rbac.user_group_roles ugr
-   JOIN keyhippo_rbac.role_permissions rp ON ugr.role_id = rp.role_id
-   JOIN keyhippo_rbac.permissions p ON rp.permission_id = p.id
-   GROUP BY user_id;
-   ```
-
-3. **Security Considerations**
-   - Always use in RLS policies
-   - Combine with row-level checks
-   - Consider caching for performance
-
-## Related Functions
-
-- [current_user_context()](current_user_context.md)
-- [verify_api_key()](verify_api_key.md)
-- [is_authorized()](is_authorized.md)
 
 ## See Also
 
-- [Permissions Table](../tables/permissions.md)
-- [Role Permissions](../tables/role_permissions.md)
-- [Security Best Practices](../security/rls_policies.md)
+- [permissions table](../tables/permissions.md)
+- [role_permissions table](../tables/role_permissions.md)
+- [assign_permission_to_role()](assign_permission_to_role.md)

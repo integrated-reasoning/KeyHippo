@@ -1,120 +1,190 @@
 # key_data
 
-Retrieves metadata for the current API key context.
+Retrieve metadata for an API key.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo.key_data()
-RETURNS jsonb
+keyhippo.key_data(
+    key_id uuid
+) RETURNS jsonb
 ```
 
-## Returns
+## Description
 
-Returns a JSONB object containing:
-- `id`: UUID of the API key
-- `description`: Key description
-- `claims`: Custom claims object
+`key_data` returns detailed information about an API key including:
+1. Key status and expiration
+2. Usage statistics
+3. Associated permissions
+4. Audit history
 
-Returns NULL if no valid API key is present.
+## Parameters
 
-## Security
+| Name | Type | Description |
+|------|------|-------------|
+| key_id | uuid | Key identifier |
 
-- SECURITY DEFINER function
-- Safe for use in RLS policies
-- Read-only access to metadata
-- No sensitive data exposure
+## Return Value
 
-## Example Usage
-
-### Basic Retrieval
-```sql
-SELECT keyhippo.key_data();
-```
-
-### In RLS Policy
-```sql
-CREATE POLICY "tenant_access" ON tenants
-    FOR ALL
-    USING (
-        id = (keyhippo.key_data()->'claims'->>'tenant_id')::uuid
-    );
-```
-
-### Claim Checking
-```sql
-CREATE OR REPLACE FUNCTION check_tenant_access(tenant_id uuid)
-RETURNS boolean
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    key_data jsonb;
-BEGIN
-    key_data := keyhippo.key_data();
-    RETURN (
-        key_data IS NOT NULL AND
-        (key_data->'claims'->>'tenant_id')::uuid = tenant_id
-    );
-END;
-$$;
-```
-
-## Implementation Notes
-
-1. **Data Source**
-```sql
--- Reads from header
-current_setting('request.headers', true)::json->>'x-api-key'
-```
-
-2. **Return Format**
+Returns JSONB object:
 ```json
 {
-    "id": "uuid-here",
-    "description": "Key description",
-    "claims": {
-        "tenant_id": "uuid-here",
-        "role": "admin",
-        "custom_claim": "value"
+    "key_id": "550e8400-e29b-41d4-a716-446655440000",
+    "key_prefix": "KH2ABJM1",
+    "status": "active",
+    "created_at": "2024-01-01T00:00:00Z",
+    "expires_at": "2025-01-01T00:00:00Z",
+    "last_used_at": "2024-01-02T10:30:00Z",
+    "usage": {
+        "total_requests": 1542,
+        "last_24h": 127,
+        "failed_attempts": 3
+    },
+    "scope": {
+        "name": "analytics",
+        "permissions": ["read_data", "export_reports"]
+    },
+    "metadata": {
+        "description": "Analytics API",
+        "environment": "production",
+        "created_by": "john.doe@example.com"
     }
 }
 ```
 
-3. **Performance**
-   - Caches results per transaction
-   - Minimal metadata lookup
-   - Efficient for RLS use
+## Examples
 
-## Error Handling
-
-1. **No API Key**
+Basic lookup:
 ```sql
--- Returns NULL
-SELECT keyhippo.key_data();
+SELECT key_data('550e8400-e29b-41d4-a716-446655440000');
 ```
 
-2. **Invalid Key**
+Check key status:
 ```sql
--- Returns NULL
-SELECT keyhippo.key_data();
+SELECT (key_data('550e8400-e29b-41d4-a716-446655440000')->>'status') = 'active' 
+AS is_active;
 ```
 
-3. **Claim Access**
+Usage statistics:
 ```sql
--- Safe navigation
-SELECT COALESCE(
-    (keyhippo.key_data()->'claims'->>'missing')::text,
-    'default'
-);
+SELECT 
+    k->>'key_prefix' as prefix,
+    (k->'usage'->>'total_requests')::int as requests,
+    (k->'usage'->>'last_24h')::int as recent_requests
+FROM (
+    SELECT key_data(key_id) as k
+    FROM api_key_metadata
+    WHERE created_at > now() - interval '7 days'
+) recent_keys
+ORDER BY recent_requests DESC;
 ```
 
-## Related Functions
+## Implementation
 
-- [current_user_context()](current_user_context.md)
-- [verify_api_key()](verify_api_key.md)
-- [update_key_claims()](update_key_claims.md)
+Data collection SQL:
+```sql
+WITH key_info AS (
+    SELECT 
+        k.key_id,
+        k.key_prefix,
+        k.status,
+        k.created_at,
+        k.expires_at,
+        k.last_used_at,
+        k.metadata,
+        s.name as scope_name,
+        s.permissions as scope_permissions
+    FROM api_key_metadata k
+    LEFT JOIN scopes s ON s.scope_id = k.scope_id
+    WHERE k.key_id = $1
+),
+key_usage AS (
+    SELECT
+        count(*) as total_requests,
+        count(*) FILTER (
+            WHERE created_at > now() - interval '24 hours'
+        ) as last_24h,
+        count(*) FILTER (
+            WHERE success = false
+        ) as failed_attempts
+    FROM request_log
+    WHERE key_id = $1
+)
+SELECT jsonb_build_object(
+    'key_id', key_id,
+    'key_prefix', key_prefix,
+    'status', status,
+    'created_at', created_at,
+    'expires_at', expires_at,
+    'last_used_at', last_used_at,
+    'usage', jsonb_build_object(
+        'total_requests', total_requests,
+        'last_24h', last_24h,
+        'failed_attempts', failed_attempts
+    ),
+    'scope', jsonb_build_object(
+        'name', scope_name,
+        'permissions', scope_permissions
+    ),
+    'metadata', metadata
+)
+FROM key_info, key_usage;
+```
+
+## Error Cases
+
+Key not found:
+```sql
+SELECT key_data('550e8400-e29b-41d4-a716-446655440000');
+ERROR:  key not found
+DETAIL:  No key exists with ID 550e8400-e29b-41d4-a716-446655440000
+```
+
+Permission denied:
+```sql
+SELECT key_data('550e8400-e29b-41d4-a716-446655440000');
+ERROR:  permission denied
+DETAIL:  Current user cannot view this key's data
+```
+
+## Permissions Required
+
+Caller must either:
+- Own the key
+- Have 'view_any_key' permission
+- Be system administrator
+
+## Performance
+
+Function uses indexes:
+```sql
+CREATE INDEX idx_key_metadata_id 
+ON api_key_metadata(key_id);
+
+CREATE INDEX idx_request_log_key 
+ON request_log(key_id, created_at DESC);
+
+CREATE INDEX idx_request_log_recent 
+ON request_log(key_id, created_at DESC) 
+WHERE created_at > now() - interval '24 hours';
+```
+
+Usage data is pre-aggregated hourly:
+```sql
+CREATE MATERIALIZED VIEW key_usage_hourly AS
+SELECT 
+    key_id,
+    date_trunc('hour', created_at) as hour,
+    count(*) as requests,
+    count(*) FILTER (WHERE success = false) as failed
+FROM request_log
+GROUP BY key_id, date_trunc('hour', created_at);
+
+REFRESH MATERIALIZED VIEW CONCURRENTLY key_usage_hourly;
+```
 
 ## See Also
 
-- [API Key Metadata](../tables/api_key_metadata.md)
-- [Security Policies](../security/rls_policies.md)
+- [api_key_metadata table](../tables/api_key_metadata.md)
+- [verify_api_key()](verify_api_key.md)
+- [create_api_key()](create_api_key.md)
