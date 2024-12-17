@@ -1,110 +1,115 @@
 # current_user_context
 
-Returns the current user context, handling both JWT and API key authentication methods.
+Return the authentication context for the current database session.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo.current_user_context() 
-RETURNS TABLE (
-    user_id uuid,
-    scope_id uuid,
-    permissions text[]
-)
+keyhippo.current_user_context() RETURNS jsonb
 ```
 
-## Returns
+## Description
 
-| Column | Type | Description |
-|--------|------|-------------|
-| user_id | uuid | The authenticated user's ID |
-| scope_id | uuid | The scope ID if using API key authentication |
-| permissions | text[] | Array of permission names granted to the user |
+`current_user_context` returns cached authentication data from the current database session. The context is set by successful API key verification or user login.
 
-## Authentication Flow
+## Return Value
 
-1. Checks for API key in `x-api-key` header
-2. If API key exists, validates it using `verify_api_key()`
-3. If no API key or invalid, checks for JWT auth using `auth.uid()`
-4. If no JWT, checks for impersonation session
-5. Returns user context with appropriate permissions
-
-## Security
-
-- SECURITY DEFINER function
-- Custom search path: `keyhippo_impersonation, keyhippo_rbac, keyhippo`
-- Used by RLS policies and other security functions
-- Safe for use in read-only transactions
-
-## Example Usage
-
-### Basic Usage
-
-```sql
-SELECT * FROM keyhippo.current_user_context();
+Returns a JSONB object with this structure:
+```json
+{
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "key_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+    "scope": "analytics",
+    "tenant_id": "91c35b46-8c55-4264-8373-cf4b1ce957b9",
+    "type": "api_key",
+    "roles": ["analyst", "reader"],
+    "groups": ["analytics_team"],
+    "metadata": {
+        "key_description": "Analytics API",
+        "authenticated_at": "2024-01-01T00:00:00Z"
+    }
+}
 ```
 
-### In RLS Policy
+Returns NULL if no context is set.
 
+## Examples
+
+Check current context:
 ```sql
-CREATE POLICY "user_access" ON "public"."resources"
-    FOR ALL
+SELECT keyhippo.current_user_context();
+```
+
+Use in RLS policy:
+```sql
+CREATE POLICY tenant_access ON accounts
     USING (
-        user_id = (SELECT user_id FROM keyhippo.current_user_context())
+        tenant_id = (current_user_context()->>'tenant_id')::uuid
     );
 ```
 
-### Checking Permissions
-
+Check role membership:
 ```sql
-CREATE POLICY "admin_access" ON "public"."sensitive_data"
-    FOR ALL
-    USING (
-        EXISTS (
-            SELECT 1 
-            FROM keyhippo.current_user_context()
-            WHERE 'admin_access' = ANY(permissions)
-        )
-    );
+SELECT 
+    CASE WHEN 'admin' = ANY(
+        (current_user_context()->'roles')::text[]
+    )
+    THEN true
+    ELSE false
+    END as is_admin;
 ```
 
-### With API Key Scopes
+## Implementation Notes
+
+1. Context is stored in GUC variable `keyhippo.current_context`
+2. Set automatically by verify_api_key() and login functions
+3. Cleared on transaction rollback
+4. Cached for duration of transaction
+5. JSON fields may be NULL if not applicable
+
+## Context Types
+
+The `type` field indicates the authentication method:
 
 ```sql
-CREATE POLICY "scoped_access" ON "public"."api_resources"
-    FOR ALL
-    USING (
-        EXISTS (
-            SELECT 1 
-            FROM keyhippo.current_user_context()
-            WHERE scope_id = api_resources.scope_id
-        )
-    );
+-- API key authentication
+"type": "api_key"
+
+-- Password authentication
+"type": "password"
+
+-- OAuth token
+"type": "oauth"
+
+-- Anonymous access
+"type": "anon"
 ```
 
-## Error Handling
+## Performance
 
-- Returns NULL user_id if no valid authentication
-- Returns empty permissions array if user has no permissions
-- Safe to use in conditional statements
-- No exceptions thrown
+Function performs minimal work:
+1. Reads GUC variable
+2. Parses JSON (already validated when set)
+3. Returns cached result
 
-## Performance Considerations
+No database queries are executed.
 
-- Caches API key validation results
-- Minimizes permission lookups
-- Safe for use in performance-critical paths
-- Designed for frequent calls in RLS policies
+## Error Cases
 
-## Related Functions
+Missing context:
+```sql
+SELECT current_user_context()->'user_id';
+-- Returns NULL
+```
 
-- [verify_api_key()](verify_api_key.md)
-- [authorize()](authorize.md)
-- [is_authorized()](is_authorized.md)
+Invalid JSON in context (should never happen):
+```sql
+ERROR:  invalid json in current_user_context
+DETAIL:  Context was corrupted or incorrectly set
+```
 
-## Notes
+## See Also
 
-- Core function for KeyHippo's security model
-- Used extensively by internal functions
-- Critical for RLS policy implementation
-- Handles all authentication methods uniformly
+- [verify_api_key()](verify_api_key.md) - Sets API key context
+- [login_as_user()](login_as_user.md) - Sets user context
+- [logout()](logout.md) - Clears context

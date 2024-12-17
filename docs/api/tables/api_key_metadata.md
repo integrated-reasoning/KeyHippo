@@ -1,98 +1,137 @@
 # api_key_metadata
 
-Stores metadata for API keys while keeping sensitive information separate.
+Stores API key metadata and status information.
 
-## Schema
+## Table Definition
 
 ```sql
 CREATE TABLE keyhippo.api_key_metadata (
-    id uuid PRIMARY KEY,
-    user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    scope_id uuid REFERENCES keyhippo.scopes(id),
-    description text,
-    prefix text NOT NULL UNIQUE,
+    key_id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    key_prefix text NOT NULL,
+    user_id uuid NOT NULL,
+    scope text,
+    tenant_id uuid,
+    description text NOT NULL,
+    status text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
     last_used_at timestamptz,
-    expires_at timestamptz NOT NULL DEFAULT (now() + interval '100 years'),
-    is_revoked boolean NOT NULL DEFAULT FALSE,
-    claims jsonb DEFAULT '{}'::jsonb
+    metadata jsonb,
+    version integer NOT NULL DEFAULT 1,
+    CONSTRAINT valid_key_prefix CHECK (key_prefix ~ '^[A-Z2-7]{8}$'),
+    CONSTRAINT valid_status CHECK (status IN ('active', 'revoked', 'expired')),
+    CONSTRAINT valid_description CHECK (length(description) <= 255)
 );
+```
+
+## Indexes
+
+```sql
+-- Fast key lookup by prefix
+CREATE UNIQUE INDEX idx_api_key_prefix 
+ON api_key_metadata(key_prefix);
+
+-- Status checks
+CREATE INDEX idx_api_key_status 
+ON api_key_metadata(status);
+
+-- Expiration checks
+CREATE INDEX idx_api_key_expires 
+ON api_key_metadata(expires_at) 
+WHERE status = 'active';
+
+-- User key lookup
+CREATE INDEX idx_api_key_user 
+ON api_key_metadata(user_id) 
+INCLUDE (key_prefix, status);
 ```
 
 ## Columns
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | uuid | Primary key and identifier for the API key |
-| user_id | uuid | Foreign key to auth.users - the key owner |
-| scope_id | uuid | Optional foreign key to keyhippo.scopes |
-| description | text | User-provided description of the key |
-| prefix | text | Unique prefix used for key identification |
-| created_at | timestamptz | Timestamp of key creation |
-| last_used_at | timestamptz | Last time the key was used |
-| expires_at | timestamptz | When the key expires (defaults to 100 years) |
-| is_revoked | boolean | Whether the key has been revoked |
-| claims | jsonb | Optional custom claims/metadata for the key |
+| Name | Type | Description |
+|------|------|-------------|
+| key_id | uuid | Primary key |
+| key_prefix | text | First 8 chars of key (base32) |
+| user_id | uuid | Key owner reference |
+| scope | text | Permission scope |
+| tenant_id | uuid | Multi-tenant isolation |
+| description | text | Key identifier (≤255 chars) |
+| status | text | active/revoked/expired |
+| created_at | timestamptz | Creation timestamp |
+| expires_at | timestamptz | Expiration timestamp |
+| last_used_at | timestamptz | Last verification time |
+| metadata | jsonb | Additional key data |
+| version | integer | Key format version |
 
-## Indexes
+## Example Queries
 
-- Primary Key on `id`
-- Unique index on `prefix`
-- Index on `user_id` for faster lookups
+List active keys for user:
+```sql
+SELECT key_prefix, description, expires_at
+FROM api_key_metadata
+WHERE user_id = 'user-uuid'
+AND status = 'active'
+ORDER BY created_at DESC;
+```
 
-## Row Level Security
+Find expiring keys:
+```sql
+SELECT key_id, key_prefix, description
+FROM api_key_metadata
+WHERE status = 'active'
+AND expires_at < now() + interval '7 days'
+ORDER BY expires_at;
+```
+
+Key usage stats:
+```sql
+SELECT 
+    date_trunc('day', last_used_at) as date,
+    count(*) as keys_used
+FROM api_key_metadata
+WHERE last_used_at >= now() - interval '30 days'
+GROUP BY 1
+ORDER BY 1;
+```
+
+## RLS Policies
 
 ```sql
-CREATE POLICY api_key_metadata_access_policy ON keyhippo.api_key_metadata
-    FOR ALL TO authenticated
+-- Users can only see their own keys
+CREATE POLICY user_keys ON api_key_metadata
+    FOR ALL
     USING (
-        user_id = auth.uid()
-        OR keyhippo.authorize('manage_api_keys')
+        user_id = (current_user_context()->>'user_id')::uuid
+    );
+
+-- Tenant isolation
+CREATE POLICY tenant_keys ON api_key_metadata
+    FOR ALL
+    USING (
+        tenant_id = (current_user_context()->>'tenant_id')::uuid
     );
 ```
 
-Users can only see and manage their own API keys unless they have the 'manage_api_keys' permission.
-
 ## Triggers
 
-- `keyhippo_audit_api_key_metadata` - Logs changes to the audit log
-- `keyhippo_notify_expiring_key_trigger` - Handles key expiration notifications
-
-## Related Tables
-
-- [api_key_secrets](api_key_secrets.md) - Stores the secure hash of the key
-- [scopes](scopes.md) - Defines available scopes
-- [audit_log](audit_log.md) - Tracks changes to API keys
-
-## Usage Example
-
 ```sql
--- Create a new API key
-SELECT * FROM keyhippo.create_api_key('Production API');
+-- Update last_used_at on verification
+CREATE TRIGGER update_last_used
+    AFTER UPDATE OF last_used_at
+    ON api_key_metadata
+    FOR EACH ROW
+    EXECUTE FUNCTION audit_key_usage();
 
--- List all active keys for current user
-SELECT 
-    id,
-    description,
-    created_at,
-    last_used_at,
-    expires_at
-FROM keyhippo.api_key_metadata
-WHERE user_id = auth.uid()
-    AND NOT is_revoked
-    AND expires_at > NOW();
-
--- Revoke a key
-UPDATE keyhippo.api_key_metadata
-SET is_revoked = TRUE
-WHERE id = 'key_id_here'
-    AND user_id = auth.uid();
+-- Check expiration on verification
+CREATE TRIGGER check_expiration
+    BEFORE UPDATE
+    ON api_key_metadata
+    FOR EACH ROW
+    EXECUTE FUNCTION validate_key_status();
 ```
 
-## Notes
+## See Also
 
-- The actual API key is never stored in this table
-- The `prefix` is used for quick key lookups without exposing the full key
-- Changes are automatically logged to the audit system
-- Supports custom claims for additional metadata
-- Integrates with the key expiration notification system
+- [api_key_secrets](api_key_secrets.md) - Stores key hashes
+- [create_api_key()](../functions/create_api_key.md) - Creates keys
+- [verify_api_key()](../functions/verify_api_key.md) - Validates keys

@@ -1,137 +1,108 @@
 # verify_api_key
 
-Verifies an API key and returns user context if valid.
+Validate an API key and return its associated context.
 
-## Syntax
+## Synopsis
 
 ```sql
-keyhippo.verify_api_key(api_key text)
-RETURNS TABLE (
-    user_id uuid,
-    scope_id uuid,
-    permissions text[]
-)
+keyhippo.verify_api_key(
+    key text
+) RETURNS jsonb
 ```
+
+## Description
+
+`verify_api_key` validates an API key in the format `prefix_string.key_string` by:
+1. Splitting on the '.' delimiter
+2. Looking up the prefix in api_key_metadata
+3. Computing SHA-256 hash of the full key
+4. Comparing against stored hash
+5. Checking expiration and revocation status
 
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| api_key | text | The API key to verify, including prefix |
+| Name | Type | Description |
+|------|------|-------------|
+| key | text | API key in format `prefix_string.key_string` |
 
-## Returns
+## Return Value
 
-Returns a single row with:
-- `user_id`: UUID of the key owner
-- `scope_id`: UUID of the key's scope (if any)
-- `permissions`: Array of permission names granted by the scope
-
-Returns no rows if the key is invalid, revoked, or expired.
-
-## Security
-
-- SECURITY DEFINER function
-- Updates `last_used_at` timestamp (rate limited)
-- Safe for use in read-only transactions
-- No direct table access required
-
-## Performance
-
-- P99 latency: 0.065ms
-- Operations/sec: 15,385 (single core)
-- Efficient prefix-based lookup
-- Cached timestamp updates
-
-## Example Usage
-
-### Basic Verification
-```sql
-SELECT * FROM keyhippo.verify_api_key('kh_your_api_key_here');
+Returns a JSONB object containing:
+```json
+{
+    "user_id": "550e8400-e29b-41d4-a716-446655440000",
+    "key_id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
+    "scope": "analytics",
+    "tenant_id": "91c35b46-8c55-4264-8373-cf4b1ce957b9",
+    "metadata": {
+        "created_at": "2024-01-01T00:00:00Z",
+        "description": "Analytics API"
+    }
+}
 ```
 
-### In RLS Policy
+Returns NULL if key is invalid.
+
+## Examples
+
+Verify a key:
 ```sql
-CREATE POLICY "api_access" ON resources
-    FOR ALL
+SELECT keyhippo.verify_api_key('KH2ABJM1.NBTGK19FH27DJSM4');
+```
+
+Use in RLS policy:
+```sql
+CREATE POLICY read_analytics ON events
+    FOR SELECT
     USING (
-        EXISTS (
-            SELECT 1 
-            FROM keyhippo.verify_api_key(
-                current_setting('request.headers', true)::json->>'x-api-key'
-            )
-        )
+        (keyhippo.verify_api_key(current_setting('request.header.x-api-key')))->>'scope' = 'analytics'
     );
 ```
 
-### With Permission Check
+## Error Cases
+
+Invalid format:
 ```sql
-CREATE POLICY "scoped_access" ON data
-    FOR ALL
-    USING (
-        EXISTS (
-            SELECT 1 
-            FROM keyhippo.verify_api_key(
-                current_setting('request.headers', true)::json->>'x-api-key'
-            ) k
-            WHERE 'read_data' = ANY(k.permissions)
-        )
-    );
+SELECT keyhippo.verify_api_key('invalid-key');
+ERROR:  invalid api key format
+DETAIL:  Key must be in format prefix_string.key_string
 ```
 
-## Error Handling
-
-1. **Invalid Key Format**
+Revoked key:
 ```sql
--- Key too short
-SELECT * FROM keyhippo.verify_api_key('invalid');
--- Returns empty result
-
--- Invalid prefix
-SELECT * FROM keyhippo.verify_api_key('invalid_prefix_here');
--- Returns empty result
+SELECT keyhippo.verify_api_key('KH2ABJM1.NBTGK19FH27DJSM4');
+ERROR:  api key has been revoked
+DETAIL:  Key KH2ABJM1.* was revoked at 2024-01-01 00:00:00+00
 ```
 
-2. **Revoked or Expired Keys**
+Expired key:
 ```sql
--- Both return empty result
-SELECT * FROM keyhippo.verify_api_key('kh_revoked_key_here');
-SELECT * FROM keyhippo.verify_api_key('kh_expired_key_here');
+SELECT keyhippo.verify_api_key('KH2ABJM1.NBTGK19FH27DJSM4');
+ERROR:  api key has expired
+DETAIL:  Key KH2ABJM1.* expired at 2024-01-01 00:00:00+00
 ```
 
 ## Implementation Notes
 
-1. **Key Verification Process**
-   - Split prefix and key parts
-   - Lookup metadata by prefix
-   - Verify key hash
-   - Check revocation and expiry
-   - Return user context
+1. Function first checks key format to fail fast on invalid input
+2. Uses key prefix for efficient metadata lookup
+3. Only performs hash comparison if key format and status are valid
+4. Records failed verification attempts in audit log
+5. Uses constant-time comparison for hash check
 
-2. **Last Used Tracking**
-   ```sql
-   -- Updates are rate limited
-   UPDATE keyhippo.api_key_metadata
-   SET last_used_at = NOW()
-   WHERE id = metadata_id
-       AND (
-           last_used_at IS NULL
-           OR last_used_at < NOW() - INTERVAL '1 minute'
-       );
-   ```
+## Performance
 
-3. **Permission Resolution**
-   - Resolves permissions from scope
-   - Returns empty array if no scope
-   - Permissions are cached in session
+Key verification uses these indexes:
+```sql
+CREATE INDEX idx_api_key_prefix ON api_key_metadata(key_prefix);
+CREATE INDEX idx_api_key_status ON api_key_metadata(status);
+CREATE INDEX idx_api_key_expires ON api_key_metadata(expires_at);
+```
 
-## Related Functions
-
-- [create_api_key()](create_api_key.md)
-- [revoke_api_key()](revoke_api_key.md)
-- [current_user_context()](current_user_context.md)
+Typical verification takes < 1ms when indexes are properly warm.
 
 ## See Also
 
-- [API Key Metadata](../tables/api_key_metadata.md)
-- [Scopes](../tables/scopes.md)
-- [Performance Guide](../../performance.md)
+- [create_api_key()](create_api_key.md) - Key generation
+- [revoke_api_key()](revoke_api_key.md) - Key invalidation
+- [api_key_metadata](../tables/api_key_metadata.md) - Key storage
