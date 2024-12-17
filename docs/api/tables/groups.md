@@ -1,152 +1,249 @@
 # groups
 
-Organizes users and roles into logical groups.
+Manages user group definitions and hierarchies.
 
-## Schema
+## Table Definition
 
 ```sql
 CREATE TABLE keyhippo_rbac.groups (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name text UNIQUE NOT NULL,
-    description text
+    group_id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    name text NOT NULL,
+    parent_id uuid REFERENCES groups(group_id),
+    tenant_id uuid,
+    description text,
+    metadata jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    created_by uuid NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT valid_group_name CHECK (name ~ '^[a-z][a-z0-9_]{2,62}[a-z0-9]$'),
+    CONSTRAINT unique_group_name UNIQUE NULLS NOT DISTINCT (name, tenant_id),
+    CONSTRAINT no_self_parent CHECK (group_id != parent_id)
+);
+
+-- Track group hierarchy path
+CREATE TABLE keyhippo_rbac.group_hierarchy (
+    ancestor_id uuid NOT NULL REFERENCES groups(group_id),
+    descendant_id uuid NOT NULL REFERENCES groups(group_id),
+    depth int NOT NULL,
+    PRIMARY KEY (ancestor_id, descendant_id),
+    CONSTRAINT valid_depth CHECK (depth >= 0),
+    CONSTRAINT no_self_cycle CHECK (ancestor_id != descendant_id)
 );
 ```
-
-## Columns
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | uuid | Primary key |
-| name | text | Unique group name |
-| description | text | Optional description |
 
 ## Indexes
 
-- Primary Key on `id`
-- Unique index on `name`
-
-## Security
-
-- RLS enabled
-- Requires manage_groups permission
-- Audit logged
-- Referenced by roles
-
-## Example Usage
-
-### Create Group
 ```sql
-INSERT INTO keyhippo_rbac.groups (name, description)
-VALUES (
-    'Engineering',
-    'Engineering department'
-);
+-- Group lookup
+CREATE UNIQUE INDEX idx_group_name 
+ON groups(name) 
+WHERE tenant_id IS NULL;
+
+-- Tenant group lookup
+CREATE UNIQUE INDEX idx_tenant_group_name 
+ON groups(tenant_id, name) 
+WHERE tenant_id IS NOT NULL;
+
+-- Hierarchy traversal
+CREATE INDEX idx_group_parent 
+ON groups(parent_id);
+
+CREATE INDEX idx_hierarchy_ancestor 
+ON group_hierarchy(ancestor_id);
+
+CREATE INDEX idx_hierarchy_descendant 
+ON group_hierarchy(descendant_id);
 ```
 
-### Group Hierarchy
+## Default Groups
+
+System creates these on initialization:
 ```sql
-DO $$
-DECLARE
-    parent_id uuid;
-    team_id uuid;
-BEGIN
-    -- Create parent group
-    INSERT INTO keyhippo_rbac.groups (name, description)
-    VALUES ('Engineering', 'Engineering department')
-    RETURNING id INTO parent_id;
-    
-    -- Create team group
-    INSERT INTO keyhippo_rbac.groups (name, description)
-    VALUES ('Backend Team', 'Backend development team')
-    RETURNING id INTO team_id;
-    
-    -- Link groups (custom table)
-    INSERT INTO group_hierarchy (parent_id, child_id)
-    VALUES (parent_id, team_id);
-END $$;
+INSERT INTO groups (name, description) VALUES
+-- Base groups
+('users', 'All system users'),
+('admins', 'System administrators'),
+
+-- Service groups
+('api_services', 'API service accounts'),
+('system_services', 'System services'),
+
+-- Security groups
+('security_admins', 'Security team'),
+('audit_readers', 'Audit log access');
 ```
 
-### Query Structure
+## Example Queries
+
+List group hierarchy:
 ```sql
 WITH RECURSIVE group_tree AS (
-    -- Base case
-    SELECT id, name, description, 0 as level
-    FROM keyhippo_rbac.groups
-    WHERE id = 'root_group_id'
+    -- Base groups
+    SELECT 
+        group_id,
+        name,
+        parent_id,
+        0 as depth,
+        ARRAY[name] as path
+    FROM groups
+    WHERE parent_id IS NULL
     
     UNION ALL
     
-    -- Recursive case
-    SELECT g.id, g.name, g.description, gt.level + 1
-    FROM keyhippo_rbac.groups g
-    JOIN group_hierarchy gh ON g.id = gh.child_id
-    JOIN group_tree gt ON gh.parent_id = gt.id
+    -- Child groups
+    SELECT 
+        g.group_id,
+        g.name,
+        g.parent_id,
+        gt.depth + 1,
+        gt.path || g.name
+    FROM groups g
+    JOIN group_tree gt ON gt.group_id = g.parent_id
+    WHERE g.tenant_id = current_tenant_id()
 )
-SELECT * FROM group_tree;
+SELECT 
+    lpad(' ', depth * 2) || name as group_tree,
+    path
+FROM group_tree
+ORDER BY path;
 ```
 
-## Implementation Notes
-
-1. **Access Control**
+Find group members:
 ```sql
--- RLS policy
-CREATE POLICY groups_access_policy ON keyhippo_rbac.groups
+SELECT 
+    u.email,
+    array_agg(r.name) as roles
+FROM users u
+JOIN user_group_roles ugr ON ugr.user_id = u.id
+JOIN roles r ON r.role_id = ugr.role_id
+WHERE ugr.group_id = (
+    SELECT group_id FROM groups WHERE name = 'engineering'
+)
+GROUP BY u.id, u.email
+ORDER BY u.email;
+```
+
+Group permissions:
+```sql
+SELECT DISTINCT
+    g.name as group_name,
+    p.name as permission_name
+FROM groups g
+JOIN user_group_roles ugr ON ugr.group_id = g.group_id
+JOIN role_permissions rp ON rp.role_id = ugr.role_id
+JOIN permissions p ON p.permission_id = rp.permission_id
+WHERE g.tenant_id = current_tenant_id()
+ORDER BY g.name, p.name;
+```
+
+## Hierarchy Management
+
+Add child group:
+```sql
+-- Create child
+INSERT INTO groups (name, parent_id)
+VALUES ('frontend', 
+    (SELECT group_id FROM groups WHERE name = 'engineering')
+);
+
+-- Update hierarchy
+INSERT INTO group_hierarchy (ancestor_id, descendant_id, depth)
+SELECT 
+    h.ancestor_id,
+    g.group_id,
+    h.depth + 1
+FROM groups g
+CROSS JOIN group_hierarchy h
+WHERE g.name = 'frontend'
+AND h.descendant_id = g.parent_id
+UNION ALL
+SELECT 
+    group_id,
+    group_id,
+    0
+FROM groups
+WHERE name = 'frontend';
+```
+
+Move group:
+```sql
+-- Update parent
+UPDATE groups 
+SET parent_id = new_parent_id 
+WHERE group_id = moving_group_id;
+
+-- Rebuild hierarchy
+DELETE FROM group_hierarchy;
+INSERT INTO group_hierarchy
+    (ancestor_id, descendant_id, depth)
+WITH RECURSIVE hierarchy AS (
+    -- Direct relationships
+    SELECT 
+        group_id, 
+        group_id as descendant_id,
+        0 as depth
+    FROM groups
+    
+    UNION ALL
+    
+    -- Inherited relationships
+    SELECT 
+        h.group_id,
+        g.group_id,
+        h.depth + 1
+    FROM groups g
+    JOIN hierarchy h ON h.descendant_id = g.parent_id
+)
+SELECT * FROM hierarchy;
+```
+
+## Triggers
+
+```sql
+-- Maintain updated_at
+CREATE TRIGGER update_group_timestamp
+    BEFORE UPDATE ON groups
+    FOR EACH ROW
+    EXECUTE FUNCTION update_timestamp();
+
+-- Audit group changes
+CREATE TRIGGER audit_group_changes
+    AFTER INSERT OR UPDATE OR DELETE ON groups
+    FOR EACH ROW
+    EXECUTE FUNCTION audit_group_change();
+
+-- Maintain hierarchy
+CREATE TRIGGER maintain_group_hierarchy
+    AFTER INSERT OR UPDATE OR DELETE ON groups
+    FOR EACH ROW
+    EXECUTE FUNCTION update_group_hierarchy();
+```
+
+## RLS Policies
+
+```sql
+-- View groups
+CREATE POLICY view_groups ON groups
+    FOR SELECT
+    USING (
+        tenant_id IS NULL 
+        OR tenant_id = current_tenant_id()
+    );
+
+-- Manage groups
+CREATE POLICY manage_groups ON groups
     FOR ALL
-    TO authenticated
-    USING (keyhippo.authorize('manage_groups'))
-    WITH CHECK (keyhippo.authorize('manage_groups'));
+    USING (
+        has_permission('manage_groups')
+        AND (
+            tenant_id IS NULL 
+            OR tenant_id = current_tenant_id()
+        )
+    );
 ```
-
-2. **Audit Logging**
-```sql
--- Via trigger
-keyhippo_audit_rbac_groups
-```
-
-3. **Role Integration**
-```sql
--- Referenced by
-keyhippo_rbac.roles.group_id
-```
-
-## Common Patterns
-
-1. **Department Structure**
-```sql
-INSERT INTO keyhippo_rbac.groups (name, description)
-VALUES
-    ('Engineering', 'Engineering department'),
-    ('Product', 'Product management'),
-    ('Design', 'Design team'),
-    ('Operations', 'Operations team');
-```
-
-2. **Team Organization**
-```sql
-INSERT INTO keyhippo_rbac.groups (name, description)
-VALUES
-    ('Backend', 'Backend development'),
-    ('Frontend', 'Frontend development'),
-    ('Infrastructure', 'Infrastructure team'),
-    ('QA', 'Quality assurance');
-```
-
-3. **Project Groups**
-```sql
-INSERT INTO keyhippo_rbac.groups (name, description)
-VALUES
-    ('Project Alpha', 'Project Alpha team'),
-    ('Project Beta', 'Project Beta team');
-```
-
-## Related Tables
-
-- [roles](roles.md)
-- [user_group_roles](user_group_roles.md)
-- [group_hierarchy](group_hierarchy.md)
 
 ## See Also
 
+- [user_group_roles](user_group_roles.md)
 - [create_group()](../functions/create_group.md)
-- [create_role()](../functions/create_role.md)
-- [RBAC Security](../security/rls_policies.md)
+- [assign_role_to_user()](../functions/assign_role_to_user.md)
