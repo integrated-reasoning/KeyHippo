@@ -66,6 +66,18 @@ curl -X GET 'https://your-project.supabase.co/rest/v1/resources' \
      -H 'x-api-key: your_api_key_here'
 ```
 
+## Performance
+
+Single-core P99 benchmarks on AMD Threadripper 3960X:
+
+| Operation | P99 Time (ms) | Ops/Sec |
+|-----------|---------------|----------|
+| API key verification | 0.065 | 15,385 |
+| RBAC authorization | 0.036 | 27,778 |
+| Role assignment | 0.016 | 62,500 |
+
+[📊 View full benchmarks](docs/performance.md)
+
 ## Documentation
 
 ### Getting Started
