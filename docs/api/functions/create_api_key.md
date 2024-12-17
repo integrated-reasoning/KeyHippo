@@ -1,8 +1,8 @@
 # create_api_key
 
-Creates a new API key for the authenticated user.
+Generate a new API key for an authenticated user.
 
-## Syntax
+## Synopsis
 
 ```sql
 keyhippo.create_api_key(
@@ -14,47 +14,71 @@ keyhippo.create_api_key(
 )
 ```
 
+## Description
+
+`create_api_key` generates an API key in the format: `prefix_string.key_string` where:
+- `prefix_string` is an 8-character base32 string used for key lookups
+- `key_string` is a 32-character base32 string used for authentication
+
+The function stores:
+- A SHA-256 hash of the key in `api_key_secrets`
+- Key metadata in `api_key_metadata` including creation time, description, and scope
+- An audit log entry with the key ID and creating user
+
 ## Parameters
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| key_description | text | Description of the API key. Must be 255 characters or less and contain only alphanumeric characters, spaces, underscores, and hyphens. |
-| scope_name | text | (Optional) Name of the scope to assign to the key. Must match an existing scope in the `keyhippo.scopes` table. |
+| Name | Type | Description |
+|------|------|-------------|
+| key_description | text | Identifier for the key. Maximum 255 characters. Accepts alphanumeric characters, spaces, underscores, and hyphens. |
+| scope_name | text | Optional. References a scope in `keyhippo.scopes`. NULL means default scope. |
 
-## Returns
+## Return Value
 
-Returns a table with two columns:
-- `api_key` (text): The complete API key (prefix + key hash). This is the only time the full key will be available.
-- `api_key_id` (uuid): The unique identifier for the created API key.
+Returns a table with:
+- `api_key`: Full key string in format `prefix_string.key_string`. Only returned at creation.
+- `api_key_id`: UUID for referencing the key in other operations.
 
-## Security
+## Privileges Required
 
-- SECURITY DEFINER function
-- Requires authenticated user context
-- Creates records in both `api_key_metadata` and `api_key_secrets` tables
-- Only authenticated users can execute
+- User must be authenticated
+- Function runs with SECURITY DEFINER
+- No additional privileges needed
 
-## Example Usage
+## Examples
 
+Create a key with default scope:
 ```sql
--- Create an API key with default scope
-SELECT * FROM keyhippo.create_api_key('Production API Key');
-
--- Create an API key with specific scope
-SELECT * FROM keyhippo.create_api_key('Analytics API', 'analytics');
+SELECT * FROM keyhippo.create_api_key('Production API');
+-- Returns:
+--           api_key           |              api_key_id
+-- ----------------------------+--------------------------------------
+-- KH2ABJM1.NBTGK19FH27DJSM4 | 550e8400-e29b-41d4-a716-446655440000
 ```
 
-## Notes
+Create a key with analytics scope:
+```sql
+SELECT * FROM keyhippo.create_api_key('Analytics Key', 'analytics');
+```
 
-- The API key is generated using cryptographically secure random bytes
-- Only the hash of the key is stored in the database
-- The prefix is used for quick lookups without exposing the full key
-- Key creation is logged in the audit system
-- Keys do not expire by default (100 year expiration)
+## Implementation
 
-## Related
+1. Generates 30 random bytes using `gen_random_bytes(30)`
+2. Encodes bytes as base32 to create key_string
+3. Takes first 5 bytes for prefix_string
+4. Computes SHA-256 hash of the complete key
+5. Stores hash and metadata with timestamp
+6. Records audit log entry with key_id and user_id
+7. Returns assembled key with prefix
 
-- [verify_api_key()](verify_api_key.md)
-- [revoke_api_key()](revoke_api_key.md)
-- [rotate_api_key()](rotate_api_key.md)
-- [api_key_metadata table](../tables/api_key_metadata.md)
+Default key settings:
+- Expiration: 100 years from creation
+- Status: active
+- Hash algorithm: SHA-256
+- Key format version: 1
+
+## See Also
+
+- [verify_api_key()](verify_api_key.md) - Validation algorithm
+- [revoke_api_key()](revoke_api_key.md) - Key invalidation
+- [rotate_api_key()](rotate_api_key.md) - Key replacement
+- [api_key_metadata](../tables/api_key_metadata.md) - Metadata storage
