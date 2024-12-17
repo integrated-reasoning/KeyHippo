@@ -1,168 +1,198 @@
 # config
 
-Internal configuration settings for KeyHippo.
+Stores system-wide configuration settings.
 
-## Schema
+## Table Definition
 
 ```sql
 CREATE TABLE keyhippo_internal.config (
     key text PRIMARY KEY,
-    value text NOT NULL,
-    description text
+    value jsonb NOT NULL,
+    description text,
+    modified_at timestamptz NOT NULL DEFAULT now(),
+    modified_by uuid NOT NULL,
+    requires_restart boolean DEFAULT false,
+    metadata jsonb,
+    CONSTRAINT valid_key CHECK (key ~ '^[a-z][a-z0-9_]{2,62}[a-z0-9]$'),
+    CONSTRAINT valid_value CHECK (jsonb_typeof(value) IN ('object', 'string', 'number', 'boolean'))
 );
 ```
 
-## Columns
+## Default Settings
 
-| Column | Type | Description |
-|--------|------|-------------|
-| key | text | Setting name |
-| value | text | Setting value |
-| description | text | Setting description |
-
-## Security
-
-- RLS enabled
-- Accessible only to postgres role
-- No direct user access
-- System managed
-
-## Core Settings
-
-| Key | Description | Default |
-|-----|-------------|---------|
-| enable_key_expiry_notifications | Enable notifications | true |
-| key_expiry_notification_hours | Hours before expiry | 72 |
-| enable_http_logging | Enable HTTP logging | false |
-| audit_log_endpoint | Audit log endpoint | https://app.keyhippo.com/api/ingest |
-| installation_uuid | Installation identifier | [generated] |
-| send_installation_notification | Send install ping | true |
-
-## Example Usage
-
-### Read Configuration
+Authentication:
 ```sql
-SELECT value::boolean
-FROM keyhippo_internal.config
-WHERE key = 'enable_http_logging';
+INSERT INTO config (key, value, description) VALUES
+('key_format', '"prefix.key"', 'API key format string'),
+('key_prefix_length', '8', 'Length of key prefix'),
+('key_strength', '32', 'Bytes of key entropy'),
+('key_expiry_days', '365', 'Default key lifetime'),
+('max_keys_per_user', '10', 'Key limit per user');
 ```
 
-### Update Setting
+Authorization:
 ```sql
-UPDATE keyhippo_internal.config
-SET value = '48'
-WHERE key = 'key_expiry_notification_hours';
+INSERT INTO config (key, value, description) VALUES
+('permission_cache_ttl', '300', 'Cache lifetime in seconds'),
+('max_role_depth', '5', 'Maximum role inheritance depth'),
+('require_mfa', 'false', 'Require MFA for admin actions'),
+('session_lifetime', '86400', 'Session TTL in seconds');
 ```
 
-### Batch Configuration
+Rate Limiting:
 ```sql
-INSERT INTO keyhippo_internal.config (key, value, description)
-VALUES
-    ('custom_setting', 'value', 'Description'),
-    ('another_setting', 'value', 'Description')
-ON CONFLICT (key) DO UPDATE
-SET value = EXCLUDED.value,
-    description = EXCLUDED.description;
+INSERT INTO config (key, value, description) VALUES
+('rate_limits', '{
+    "anonymous": {
+        "requests_per_minute": 60,
+        "burst": 5
+    },
+    "authenticated": {
+        "requests_per_minute": 1000,
+        "burst": 50
+    }
+}', 'Rate limit configuration');
+```
+
+Audit:
+```sql
+INSERT INTO config (key, value, description) VALUES
+('audit_level', '"standard"', 'Audit detail level'),
+('retention_months', '12', 'Audit log retention'),
+('log_queries', 'false', 'Record SQL queries'),
+('log_client_ip', 'true', 'Record client IPs');
+```
+
+## Example Queries
+
+Get setting:
+```sql
+SELECT value FROM config WHERE key = 'key_expiry_days';
+```
+
+Update setting:
+```sql
+UPDATE config 
+SET 
+    value = '180'::jsonb,
+    modified_at = now(),
+    modified_by = current_user_id()
+WHERE key = 'key_expiry_days';
+```
+
+Check modified settings:
+```sql
+SELECT 
+    key,
+    value,
+    modified_at,
+    (SELECT email FROM users WHERE id = modified_by) as modified_by
+FROM config
+WHERE modified_at > now() - interval '24 hours'
+ORDER BY modified_at DESC;
+```
+
+Settings requiring restart:
+```sql
+SELECT key, value, description
+FROM config
+WHERE requires_restart = true
+AND modified_at > pg_postmaster_start_time();
+```
+
+## Setting Types
+
+Simple values:
+```sql
+-- String
+"prefix.key"
+
+-- Number
+60
+
+-- Boolean
+true
+```
+
+Complex objects:
+```json
+{
+    "levels": {
+        "anonymous": {
+            "max": 60,
+            "window": "1 minute"
+        },
+        "authenticated": {
+            "max": 1000,
+            "window": "1 minute"
+        }
+    },
+    "headers": {
+        "required": ["x-api-key"],
+        "optional": ["x-request-id"]
+    }
+}
 ```
 
 ## Implementation Notes
 
-1. **Access Control**
+Access function:
 ```sql
--- RLS policy
-CREATE POLICY config_access_policy ON keyhippo_internal.config
-    USING (CURRENT_USER = 'postgres');
+CREATE FUNCTION get_config(
+    setting text,
+    default_value jsonb DEFAULT NULL
+) RETURNS jsonb AS $$
+    SELECT COALESCE(
+        (SELECT value FROM config WHERE key = $1),
+        $2
+    );
+$$ LANGUAGE sql STABLE;
 ```
 
-2. **Type Handling**
+Cache table:
 ```sql
--- Boolean settings
-SELECT value::boolean FROM keyhippo_internal.config
-WHERE key = 'enable_feature';
-
--- Numeric settings
-SELECT value::int FROM keyhippo_internal.config
-WHERE key = 'timeout_seconds';
-
--- JSON settings
-SELECT value::jsonb FROM keyhippo_internal.config
-WHERE key = 'complex_setting';
-```
-
-3. **Default Values**
-```sql
--- Set during initialization
-SELECT keyhippo.initialize_keyhippo();
-```
-
-## Configuration Categories
-
-1. **Notifications**
-```sql
--- Key expiry
-enable_key_expiry_notifications
-key_expiry_notification_hours
-
--- HTTP logging
-enable_http_logging
-audit_log_endpoint
-```
-
-2. **System Settings**
-```sql
--- Installation
-installation_uuid
-send_installation_notification
-```
-
-## Usage Patterns
-
-1. **Feature Flags**
-```sql
--- Check if feature is enabled
-SELECT EXISTS (
-    SELECT 1
-    FROM keyhippo_internal.config
-    WHERE key = 'enable_feature'
-    AND value = 'true'
+CREATE UNLOGGED TABLE config_cache (
+    key text PRIMARY KEY,
+    value jsonb NOT NULL,
+    cached_at timestamptz NOT NULL DEFAULT now()
 );
 ```
 
-2. **System Values**
+Invalidation trigger:
 ```sql
--- Get installation ID
-SELECT value::uuid
-FROM keyhippo_internal.config
-WHERE key = 'installation_uuid';
+CREATE TRIGGER invalidate_config_cache
+    AFTER UPDATE ON config
+    FOR EACH ROW
+    EXECUTE FUNCTION invalidate_config();
 ```
 
-3. **Timeouts**
+## Error Cases
+
+Invalid key:
 ```sql
--- Get notification hours
-SELECT value::int
-FROM keyhippo_internal.config
-WHERE key = 'key_expiry_notification_hours';
+INSERT INTO config (key, value) VALUES ('123_invalid', '0');
+ERROR:  new row violates check constraint "valid_key"
+DETAIL:  Key must start with letter, use only a-z, 0-9, underscore
 ```
 
-## Related Functions
+Invalid value:
+```sql
+UPDATE config SET value = 'invalid'::jsonb;
+ERROR:  new row violates check constraint "valid_value"
+DETAIL:  Value must be valid JSON object, string, number, or boolean
+```
 
+## Permissions Required
+
+Read settings:
+- Any authenticated user
+
+Modify settings:
+- 'manage_config' permission
+- System administrator access
+
+## See Also
+
+- [System Configuration](../config.md)
 - [initialize_keyhippo()](../functions/initialize_keyhippo.md)
-- [enable_audit_log_notify()](../functions/enable_audit_log_notify.md)
-- [disable_audit_log_notify()](../functions/disable_audit_log_notify.md)
-
-## Security Considerations
-
-1. **Access Control**
-   - Only postgres role can access
-   - No direct user modification
-   - Audit logged changes
-
-2. **Value Validation**
-   - Type checking on read
-   - Constrained values
-   - Default fallbacks
-
-3. **Security Settings**
-   - HTTP logging control
-   - Notification management
-   - System identification
+- [Configuration API](../api/config.md)
