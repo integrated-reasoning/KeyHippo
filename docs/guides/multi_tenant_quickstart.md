@@ -1,231 +1,277 @@
 # Multi-Tenant Quickstart
 
-Scale your application with clean tenant isolation and robust access controls.
+## Installation
 
-## Overview
-
-```mermaid
-graph TD
-    A[API Client] -->|API Key| B[KeyHippo Auth]
-    B -->|Tenant Context| C[RLS Policies]
-    C -->|Access Control| D[Resources]
-    E[User] -->|JWT| B
-    F[Admin] -->|Impersonation| B
-```
-
-## Setup
-
-1. Install dependencies:
+Install required extensions:
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_net;
-CREATE EXTENSION IF NOT EXISTS pg_cron;
 ```
 
-2. Install KeyHippo:
+Initialize KeyHippo:
 ```sql
-\i sql/keyhippo.sql
-```
-
-## Tenant Architecture
-
-1. Create tenant tables:
-```sql
-CREATE TABLE tenants (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name text NOT NULL,
-    settings jsonb DEFAULT '{}',
-    created_at timestamptz DEFAULT now()
-);
-
-CREATE TABLE tenant_members (
-    tenant_id uuid REFERENCES tenants(id) ON DELETE CASCADE,
-    user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE,
-    role text NOT NULL,
-    PRIMARY KEY (tenant_id, user_id)
+SELECT initialize_keyhippo(
+    'multi_tenant',
+    '{
+        "tenant_isolation": true,
+        "shared_schemas": false,
+        "audit_level": "write"
+    }'
 );
 ```
 
-2. Enable RLS:
+## Create First Tenant
+
+Create tenant record:
 ```sql
-ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
-ALTER TABLE tenant_members ENABLE ROW LEVEL SECURITY;
+INSERT INTO tenants (
+    tenant_id,
+    name,
+    settings
+) VALUES (
+    gen_random_uuid(),
+    'acme_corp',
+    '{
+        "max_users": 100,
+        "max_storage_gb": 50,
+        "features": ["api_access", "audit_log"]
+    }'
+) RETURNING tenant_id;
 ```
 
-## Access Control
-
-1. Create tenant access function:
+Initialize tenant schema:
 ```sql
-CREATE OR REPLACE FUNCTION public.has_tenant_access(tenant_id uuid)
-RETURNS boolean
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, private, keyhippo
-AS $$
-DECLARE
-    ctx record;
-    key_data jsonb;
-BEGIN
-    -- Get authentication context
-    SELECT * INTO ctx FROM keyhippo.current_user_context();
-    
-    -- Check direct membership
-    IF EXISTS (
-        SELECT 1 FROM tenant_members
-        WHERE user_id = ctx.user_id
-        AND tenant_id = $1
-    ) THEN
-        RETURN true;
-    END IF;
-    
-    -- Check API key claims
-    key_data := keyhippo.key_data();
-    RETURN (
-        key_data IS NOT NULL AND
-        (key_data->'claims'->>'tenant_id')::uuid = $1
-    );
-END;
-$$;
+SELECT setup_tenant_schema('acme_corp');
+-- Creates:
+-- - Tenant-specific schema
+-- - Default roles
+-- - Initial admin user
 ```
 
-2. Apply RLS policies:
-```sql
--- Tenant access policy
-CREATE POLICY tenant_access_policy ON tenants
-    FOR ALL TO authenticated, anon
-    USING (has_tenant_access(id));
+## Configure Access
 
--- Resource policy template
-CREATE POLICY resource_tenant_policy ON resource_table
-    FOR ALL TO authenticated, anon
-    USING (has_tenant_access(tenant_id));
+Create tenant admin:
+```sql
+SELECT create_tenant_admin(
+    tenant_id := '550e8400-e29b-41d4-a716-446655440000',
+    email := 'admin@acme.com',
+    initial_password := 'temp-password'
+);
 ```
 
-## API Keys
-
-1. Create tenant-specific API key:
+Create API key:
 ```sql
-CREATE OR REPLACE FUNCTION create_tenant_api_key(
-    tenant_id uuid,
-    description text
-) RETURNS text
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    key_record record;
-BEGIN
-    -- Verify tenant access
-    IF NOT has_tenant_access(tenant_id) THEN
-        RAISE EXCEPTION 'Unauthorized';
-    END IF;
-
-    -- Create API key
-    SELECT * INTO key_record FROM keyhippo.create_api_key(
-        description,
-        'tenant'
-    );
-    
-    -- Add tenant claim
-    PERFORM keyhippo.update_key_claims(
-        key_record.api_key_id,
-        jsonb_build_object(
-            'tenant_id', tenant_id,
-            'created_at', now()
-        )
-    );
-    
-    RETURN key_record.api_key;
-END;
-$$;
-```
-
-## Security
-
-1. Enable audit logging:
-```sql
--- Update configuration
-INSERT INTO keyhippo_internal.config (key, value)
-VALUES 
-    ('enable_audit_logging', 'true'),
-    ('audit_retention_days', '90');
-```
-
-2. Configure key expiration:
-```sql
--- Set default key expiration to 90 days
-UPDATE keyhippo_internal.config
-SET value = '90'
-WHERE key = 'key_expiry_notification_hours';
-```
-
-## Testing
-
-1. Set up test data:
-```sql
-DO $$
-DECLARE
-    tenant_id uuid;
-    test_user_id uuid;
-BEGIN
-    -- Create test tenant
-    INSERT INTO tenants (name)
-    VALUES ('Acme Corp')
-    RETURNING id INTO tenant_id;
-    
-    -- Create test user
-    SELECT id INTO test_user_id
-    FROM auth.users
-    WHERE email = 'test@example.com';
-    
-    -- Add membership
-    INSERT INTO tenant_members (tenant_id, user_id, role)
-    VALUES (tenant_id, test_user_id, 'admin');
-END $$;
-```
-
-2. Test the setup:
-```sql
--- Create test API key
 SELECT create_tenant_api_key(
-    'tenant_id_here',
-    'Test API Key'
+    tenant_id := '550e8400-e29b-41d4-a716-446655440000',
+    description := 'Initial Access Key'
+);
+-- Returns: KH2ABJM1.NBTGK19FH27DJSM4
+```
+
+## Add Resources
+
+Create resource table:
+```sql
+CREATE TABLE resources (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    tenant_id uuid NOT NULL REFERENCES tenants(tenant_id),
+    name text NOT NULL,
+    data jsonb,
+    created_at timestamptz DEFAULT now(),
+    created_by uuid NOT NULL,
+    CONSTRAINT valid_name CHECK (length(name) BETWEEN 1 AND 255)
 );
 
--- Test access
-SELECT has_tenant_access('tenant_id_here');
+-- Enable RLS
+ALTER TABLE resources ENABLE ROW LEVEL SECURITY;
+
+-- Create tenant policy
+CREATE POLICY tenant_resources ON resources
+    FOR ALL
+    USING (tenant_id = current_tenant_id());
 ```
 
-## Performance Tips
-
-1. **Index Critical Fields**
+Add sample data:
 ```sql
-CREATE INDEX idx_tenant_members_user_id 
-    ON tenant_members(user_id);
-
-CREATE INDEX idx_resources_tenant_id 
-    ON resources(tenant_id);
+WITH tenant AS (
+    SELECT tenant_id, name 
+    FROM tenants 
+    WHERE name = 'acme_corp'
+    LIMIT 1
+)
+INSERT INTO resources (
+    tenant_id,
+    name,
+    data,
+    created_by
+) VALUES (
+    (SELECT tenant_id FROM tenant),
+    'Sample Resource',
+    '{"type": "document", "status": "draft"}',
+    current_user_id()
+);
 ```
 
-2. **Batch Operations**
+## Test Access
+
+Connect as tenant:
 ```sql
--- Example: Bulk user assignment
-INSERT INTO tenant_members (tenant_id, user_id, role)
+-- Set context
+SELECT set_tenant_context('550e8400-e29b-41d4-a716-446655440000');
+
+-- Try access
+SELECT count(*) FROM resources;
+```
+
+Test API key:
+```sql
+-- Verify key
+SELECT verify_api_key('KH2ABJM1.NBTGK19FH27DJSM4');
+
+-- Check access
+SELECT * FROM resources 
+WHERE tenant_id = current_tenant_id()
+LIMIT 5;
+```
+
+## Add Users
+
+Create tenant user:
+```sql
+SELECT create_tenant_user(
+    tenant_id := '550e8400-e29b-41d4-a716-446655440000',
+    email := 'user@acme.com',
+    role := 'editor'
+);
+```
+
+Assign permissions:
+```sql
+-- Create role
+SELECT create_tenant_role(
+    tenant_id := '550e8400-e29b-41d4-a716-446655440000',
+    name := 'editor',
+    permissions := ARRAY['read_resources', 'edit_resources']
+);
+
+-- Assign to user
+SELECT assign_tenant_role(
+    user_id := '67e55044-10b1-426f-9247-bb680e5fe0c8',
+    role := 'editor'
+);
+```
+
+## Monitor Usage
+
+Check tenant metrics:
+```sql
+-- Resource usage
+SELECT 
+    t.name as tenant,
+    count(r.*) as resource_count,
+    max(r.created_at) as last_created
+FROM tenants t
+LEFT JOIN resources r ON r.tenant_id = t.tenant_id
+GROUP BY t.tenant_id, t.name;
+
+-- API usage
+SELECT 
+    date_trunc('hour', created_at) as hour,
+    count(*) as requests,
+    count(DISTINCT user_id) as unique_users
+FROM request_log
+WHERE tenant_id = '550e8400-e29b-41d4-a716-446655440000'
+AND created_at > now() - interval '24 hours'
+GROUP BY 1
+ORDER BY 1;
+```
+
+## Common Operations
+
+Switch tenants:
+```sql
+-- Clear context
+SELECT reset_tenant_context();
+
+-- Set new context
+SELECT set_tenant_context('91c35b46-8c55-4264-8373-cf4b1ce957b9');
+```
+
+Share resources:
+```sql
+-- Create share
+SELECT share_resource(
+    resource_id := '550e8400-e29b-41d4-a716-446655440000',
+    target_tenant := '91c35b46-8c55-4264-8373-cf4b1ce957b9'
+);
+
+-- Access shared
+SELECT * FROM resources 
+WHERE id IN (
+    SELECT resource_id 
+    FROM shared_resources 
+    WHERE shared_with = current_tenant_id()
+);
+```
+
+Manage quotas:
+```sql
+-- Update limits
+UPDATE tenants 
+SET settings = jsonb_set(
+    settings,
+    '{max_storage_gb}',
+    '100'
+)
+WHERE tenant_id = '550e8400-e29b-41d4-a716-446655440000';
+
+-- Check usage
+SELECT 
+    t.name,
+    (t.settings->>'max_storage_gb')::int as quota_gb,
+    sum(length(r.data::text))/1024.0/1024.0 as used_mb
+FROM tenants t
+LEFT JOIN resources r ON r.tenant_id = t.tenant_id
+GROUP BY t.tenant_id, t.name, t.settings
+HAVING sum(length(r.data::text))/1024.0/1024.0 > 
+    (t.settings->>'max_storage_gb')::int * 1024;
+```
+
+## Troubleshooting
+
+Check tenant status:
+```sql
+-- Verify tenant
 SELECT 
     tenant_id,
-    unnest(user_ids) as user_id,
-    'member' as role
-FROM json_array_elements_text('["user1", "user2"]') as user_ids;
+    name,
+    status,
+    settings,
+    created_at
+FROM tenants
+WHERE tenant_id = '550e8400-e29b-41d4-a716-446655440000';
+
+-- Check context
+SELECT 
+    current_tenant_id() as tenant,
+    current_user_id() as user,
+    current_setting('app.tenant_name') as name;
 ```
 
-## Next Steps
+Review audit log:
+```sql
+SELECT 
+    created_at,
+    event_type,
+    event_data
+FROM audit_log
+WHERE tenant_id = '550e8400-e29b-41d4-a716-446655440000'
+AND created_at > now() - interval '1 hour'
+ORDER BY created_at DESC;
+```
 
-- Implement [Custom Claims](../api/functions/update_key_claims.md)
-- Set up [Key Rotation](api_key_patterns.md#key-rotation)
-- Configure [Audit Logging](../api/tables/audit_log.md)
+## See Also
 
-## Related Resources
-
-- [API Key Patterns](api_key_patterns.md)
 - [Multi-Tenant Guide](multi_tenant.md)
-- [Security Best Practices](../api/security/rls_policies.md)
+- [RLS Policies](../api/security/rls_policies.md)
+- [Tenant API](../api/tenants.md)

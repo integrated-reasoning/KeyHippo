@@ -1,111 +1,243 @@
-# QuickStart Guide
-
-Get started with KeyHippo's basic API key authentication in minutes.
-
-## Prerequisites
-
-- PostgreSQL 14 or higher
-- A Supabase project (or compatible PostgreSQL setup)
-- Database superuser access for installation
+# KeyHippo Quickstart
 
 ## Installation
 
-1. Install required extensions:
+Install extensions:
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_net;
 ```
 
-2. Install KeyHippo:
+Install KeyHippo:
 ```sql
-\i sql/keyhippo.sql
+CREATE EXTENSION keyhippo;
+SELECT initialize_keyhippo();
 ```
 
-## Basic Setup
+## Create First Key
 
-1. Initialize KeyHippo for your project:
+Generate admin key:
 ```sql
-SELECT keyhippo.initialize_keyhippo();
+SELECT create_api_key(
+    description := 'Admin API Key',
+    scope := 'admin'
+);
+-- Returns: KH2ABJM1.NBTGK19FH27DJSM4
 ```
 
-This creates:
-- Default groups and roles
-- Basic permissions
-- Required tables and functions
-
-## Create Your First API Key
-
-1. Create a key for authenticated users:
+Test key:
 ```sql
-SELECT * FROM keyhippo.create_api_key('My First API Key');
+SELECT verify_api_key('KH2ABJM1.NBTGK19FH27DJSM4');
+-- Returns:
+-- {
+--   "key_id": "550e8400-e29b-41d4-a716-446655440000",
+--   "scope": "admin",
+--   "user_id": "67e55044-10b1-426f-9247-bb680e5fe0c8"
+-- }
 ```
 
-Save the returned API key - it won't be shown again!
+## Protect Resources
 
-## Protect Your Resources
-
-1. Enable Row Level Security on your table:
+Create table:
 ```sql
 CREATE TABLE items (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
     name text NOT NULL,
-    data jsonb
+    data jsonb,
+    owner_id uuid NOT NULL,
+    created_at timestamptz DEFAULT now()
 );
 
+-- Enable RLS
 ALTER TABLE items ENABLE ROW LEVEL SECURITY;
-```
 
-2. Create an RLS policy using KeyHippo:
-```sql
-CREATE POLICY "api_access" ON items
+-- Create policy
+CREATE POLICY item_access ON items
     FOR ALL
-    TO authenticated, anon
     USING (
-        -- Allow access if user is authenticated or has valid API key
-        (SELECT user_id FROM keyhippo.current_user_context()) IS NOT NULL
+        owner_id = (current_user_context()->>'user_id')::uuid
+        OR has_permission('admin')
     );
 ```
 
-## Use Your API Key
-
-1. In your API requests, include the header:
+Add data:
+```sql
+INSERT INTO items (
+    name,
+    data,
+    owner_id
+) VALUES (
+    'Test Item',
+    '{"status": "active"}',
+    current_user_id()
+);
 ```
-x-api-key: your_api_key_here
+
+## Manage Access
+
+Create role:
+```sql
+SELECT create_role(
+    name := 'editor',
+    description := 'Can edit items'
+);
+
+-- Add permissions
+SELECT assign_permission_to_role(
+    permission := 'edit_items',
+    role := 'editor'
+);
 ```
 
-2. Test the access:
+Create user:
+```sql
+SELECT create_user(
+    email := 'editor@example.com',
+    initial_password := 'temp-pass'
+);
+
+-- Assign role
+SELECT assign_role_to_user(
+    user_id := '91c35b46-8c55-4264-8373-cf4b1ce957b9',
+    role := 'editor'
+);
+```
+
+Create scoped key:
+```sql
+SELECT create_api_key(
+    description := 'Editor API Key',
+    scope := 'editor'
+);
+```
+
+## Use API Keys
+
+HTTP request:
 ```bash
-curl -X GET 'https://your-project.supabase.co/rest/v1/items' \
-  -H 'x-api-key: your_api_key_here'
+# Get items
+curl -X GET 'https://api.example.com/items' \
+  -H 'x-api-key: KH2ABJM1.NBTGK19FH27DJSM4'
+
+# Create item
+curl -X POST 'https://api.example.com/items' \
+  -H 'x-api-key: KH2ABJM1.NBTGK19FH27DJSM4' \
+  -H 'content-type: application/json' \
+  -d '{"name": "New Item", "data": {"status": "draft"}}'
 ```
 
-## Next Steps
+Database function:
+```sql
+-- Check request
+SELECT check_request('{
+    "method": "POST",
+    "path": "/items",
+    "headers": {
+        "x-api-key": "KH2ABJM1.NBTGK19FH27DJSM4"
+    },
+    "body": {
+        "name": "New Item",
+        "data": {"status": "draft"}
+    }
+}'::jsonb);
 
-- Review the [API Documentation](../api/index.md) for detailed function reference
-- Implement [API Key Patterns](api_key_patterns.md) for advanced usage
-- Set up [Multi-Tenant Access](multi_tenant.md) for larger applications
+-- Create item if authorized
+DO $$
+DECLARE
+    key_data jsonb;
+BEGIN
+    -- Verify key
+    SELECT verify_api_key(
+        current_setting('request.header.x-api-key')
+    ) INTO key_data;
+    
+    -- Create item
+    IF key_data IS NOT NULL THEN
+        INSERT INTO items (
+            name,
+            data,
+            owner_id
+        ) VALUES (
+            current_setting('request.body.name'),
+            current_setting('request.body.data')::jsonb,
+            (key_data->>'user_id')::uuid
+        );
+    END IF;
+END;
+$$;
+```
 
-## Common Issues
+## Monitor Usage
 
-### API Key Not Working
-- Ensure the key hasn't expired or been revoked
-- Check that the x-api-key header is set correctly
-- Verify RLS policies grant necessary permissions
+Check key usage:
+```sql
+SELECT 
+    k.key_prefix,
+    k.description,
+    count(r.*) as requests,
+    max(r.created_at) as last_used
+FROM api_key_metadata k
+LEFT JOIN request_log r ON r.key_id = k.key_id
+WHERE k.status = 'active'
+GROUP BY k.key_id, k.key_prefix, k.description
+ORDER BY requests DESC;
+```
 
-### Permission Errors
-- Check user role assignments
-- Verify API key scope settings
-- Review RLS policy conditions
+Review audit log:
+```sql
+SELECT 
+    created_at,
+    event_type,
+    event_data->>'key_prefix' as key,
+    event_data->>'path' as path
+FROM audit_log
+WHERE event_type = 'api_request'
+AND created_at > now() - interval '1 hour'
+ORDER BY created_at DESC;
+```
 
-## Security Tips
+## Key Maintenance
 
-1. Never store API keys in your code
-2. Use environment variables for key storage
-3. Implement key rotation regularly
-4. Monitor the audit log for suspicious activity
+Rotate key:
+```sql
+SELECT rotate_api_key(
+    key_id := '550e8400-e29b-41d4-a716-446655440000',
+    grace_period := interval '24 hours'
+);
+```
 
-## Need More?
+Revoke key:
+```sql
+SELECT revoke_api_key(
+    key_id := '550e8400-e29b-41d4-a716-446655440000',
+    reason := 'Security audit'
+);
+```
 
-- For multi-tenant setups, see our [Multi-Tenant Guide](enterprise_quickstart.md)
-- Join our [GitHub Discussions](https://github.com/integrated-reasoning/keyhippo/discussions)
-- Report issues on our [Issue Tracker](https://github.com/integrated-reasoning/keyhippo/issues)
+## Common Tasks
+
+Check permissions:
+```sql
+-- Direct check
+SELECT authorize('edit_items');
+
+-- In RLS policy
+CREATE POLICY edit_access ON items
+    FOR UPDATE
+    USING (authorize('edit_items'));
+```
+
+Switch context:
+```sql
+-- Impersonate user
+SELECT login_as_user('91c35b46-8c55-4264-8373-cf4b1ce957b9');
+
+-- Reset context
+SELECT logout();
+```
+
+## See Also
+
+- [API Key Patterns](api_key_patterns.md)
+- [Multi-Tenant Setup](multi_tenant_quickstart.md)
+- [Security Guide](../api/security/function_security.md)
