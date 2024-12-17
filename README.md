@@ -1,6 +1,6 @@
 # KeyHippo
 
-Add powerful, secure API key authentication to your Supabase project.
+Industrial-strength API key auth for modern Postgres applications.
 
 <!-- markdownlint-disable-next-line -->
 <div align="center">
@@ -13,15 +13,15 @@ Add powerful, secure API key authentication to your Supabase project.
 
 ## What is KeyHippo?
 
-KeyHippo extends Supabase with industrial-strength API key authentication that works seamlessly with Row Level Security (RLS) and Role-Based Access Control (RBAC).
+KeyHippo adds production-ready API key authentication to Supabase that works seamlessly with Row Level Security (RLS) and Role-Based Access Control (RBAC).
 
 ### Key Features
 
-- **✨ Easy Integration**: Works directly with your existing Supabase setup
-- **🔒 Security First**: Zero plaintext storage, high-entropy keys, audit logging
-- **🎯 Fine-Grained Control**: Tenant isolation, role-based access, custom claims
-- **⚡ High Performance**: Pure SQL implementation, optimized queries
-- **🛠️ Developer Friendly**: Clear APIs, comprehensive docs, real-world patterns
+- **✨ Instant Setup**: 2-minute setup, immediate value
+- **🔒 Production Ready**: Built-in audit logs, key rotation, tenant isolation
+- **🎯 Scale With You**: From prototype to millions of users
+- **⚡ High Performance**: Pure SQL, no extra services
+- **🛠️ Developer Experience**: Clear APIs, real examples, zero friction
 
 ## Quick Start
 
@@ -69,16 +69,16 @@ curl -X GET 'https://your-project.supabase.co/rest/v1/resources' \
 ## Documentation
 
 ### Getting Started
-- [🚀 QuickStart Guide](docs/guides/quickstart.md) - Basic setup and usage
-- [🏢 Enterprise Guide](docs/guides/enterprise_quickstart.md) - Multi-tenant setup
+- [🚀 5-Minute Quickstart](docs/guides/quickstart.md) - From zero to working API keys
+- [🏢 Multi-Tenant Setup](docs/guides/multi_tenant_quickstart.md) - Scale with your user base
 
 ### Implementation Guides
-- [🔑 API Key Patterns](docs/guides/api_key_patterns.md) - Common implementation patterns
-- [🏠 Multi-Tenant Guide](docs/guides/multi_tenant.md) - Tenant isolation patterns
+- [🔑 API Key Patterns](docs/guides/api_key_patterns.md) - Real-world implementation patterns
+- [🏠 Tenant Isolation](docs/guides/multi_tenant.md) - Clean multi-tenant architecture
 
 ### Reference
 - [📚 API Documentation](docs/api/index.md) - Complete API reference
-- [🛡️ Security Guide](docs/api/security/rls_policies.md) - Security best practices
+- [🛡️ Security Guide](docs/api/security/rls_policies.md) - Production security
 
 ## Development
 
@@ -113,7 +113,7 @@ We welcome contributions! Before submitting a PR:
 - [📝 Issues](https://github.com/integrated-reasoning/KeyHippo/issues) - Bug reports and features
 - [🤝 Discussions](https://github.com/integrated-reasoning/KeyHippo/discussions) - Questions and ideas
 - [🔒 Security](SECURITY.md) - Vulnerability reporting
-- [💼 Enterprise](https://keyhippo.com) - Commercial support
+- [💼 Pro Support](https://keyhippo.com) - Priority support & custom features
 
 ## License
 

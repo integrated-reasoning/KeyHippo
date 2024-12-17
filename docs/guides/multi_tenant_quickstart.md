@@ -1,15 +1,8 @@
-# Enterprise QuickStart Guide
+# Multi-Tenant Quickstart
 
-Implementation guide for setting up KeyHippo in a multi-tenant enterprise environment.
+Scale your application with clean tenant isolation and robust access controls.
 
-## Prerequisites
-
-- PostgreSQL 14 or higher
-- Supabase Enterprise or self-hosted setup
-- Database superuser access
-- Basic understanding of RBAC concepts
-
-## Architecture Overview
+## Overview
 
 ```mermaid
 graph TD
@@ -20,7 +13,7 @@ graph TD
     F[Admin] -->|Impersonation| B
 ```
 
-## Installation
+## Setup
 
 1. Install dependencies:
 ```sql
@@ -34,7 +27,7 @@ CREATE EXTENSION IF NOT EXISTS pg_cron;
 \i sql/keyhippo.sql
 ```
 
-## Tenant Setup
+## Tenant Architecture
 
 1. Create tenant tables:
 ```sql
@@ -59,41 +52,7 @@ ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenant_members ENABLE ROW LEVEL SECURITY;
 ```
 
-## RBAC Configuration
-
-1. Create tenant-specific groups:
-```sql
-DO $$
-DECLARE
-    tenant_group_id uuid;
-BEGIN
-    -- Create tenant admin group
-    SELECT keyhippo_rbac.create_group(
-        'Tenant Administrators',
-        'Tenant-level administrative access'
-    ) INTO tenant_group_id;
-    
-    -- Create admin role
-    PERFORM keyhippo_rbac.create_role(
-        'Tenant Admin',
-        'Full tenant access',
-        tenant_group_id,
-        'admin'
-    );
-END $$;
-```
-
-2. Set up permissions:
-```sql
--- Add tenant management permissions
-INSERT INTO keyhippo_rbac.permissions (name, description)
-VALUES 
-    ('tenant:admin', 'Full tenant access'),
-    ('tenant:member', 'Basic tenant access'),
-    ('tenant:read', 'Read-only tenant access');
-```
-
-## Access Control Implementation
+## Access Control
 
 1. Create tenant access function:
 ```sql
@@ -142,7 +101,7 @@ CREATE POLICY resource_tenant_policy ON resource_table
     USING (has_tenant_access(tenant_id));
 ```
 
-## API Key Management
+## API Keys
 
 1. Create tenant-specific API key:
 ```sql
@@ -181,7 +140,7 @@ END;
 $$;
 ```
 
-## Monitoring Setup
+## Security
 
 1. Enable audit logging:
 ```sql
@@ -192,19 +151,7 @@ VALUES
     ('audit_retention_days', '90');
 ```
 
-2. Create audit views:
-```sql
-CREATE VIEW tenant_audit_log AS
-SELECT 
-    a.*,
-    (a.data->'claims'->>'tenant_id')::uuid as tenant_id
-FROM keyhippo.audit_log a
-WHERE a.data ? 'tenant_id';
-```
-
-## Security Hardening
-
-1. Configure key expiration:
+2. Configure key expiration:
 ```sql
 -- Set default key expiration to 90 days
 UPDATE keyhippo_internal.config
@@ -212,20 +159,9 @@ SET value = '90'
 WHERE key = 'key_expiry_notification_hours';
 ```
 
-2. Enable automatic key rotation:
-```sql
-SELECT cron.schedule(
-    'rotate-tenant-keys',
-    '0 0 * * 0',
-    $$
-    SELECT rotate_expired_tenant_keys();
-    $$
-);
-```
+## Testing
 
-## Testing Setup
-
-1. Create test tenant:
+1. Set up test data:
 ```sql
 DO $$
 DECLARE
@@ -234,7 +170,7 @@ DECLARE
 BEGIN
     -- Create test tenant
     INSERT INTO tenants (name)
-    VALUES ('Test Tenant')
+    VALUES ('Acme Corp')
     RETURNING id INTO tenant_id;
     
     -- Create test user
@@ -248,7 +184,7 @@ BEGIN
 END $$;
 ```
 
-2. Verify setup:
+2. Test the setup:
 ```sql
 -- Create test API key
 SELECT create_tenant_api_key(
@@ -260,6 +196,28 @@ SELECT create_tenant_api_key(
 SELECT has_tenant_access('tenant_id_here');
 ```
 
+## Performance Tips
+
+1. **Index Critical Fields**
+```sql
+CREATE INDEX idx_tenant_members_user_id 
+    ON tenant_members(user_id);
+
+CREATE INDEX idx_resources_tenant_id 
+    ON resources(tenant_id);
+```
+
+2. **Batch Operations**
+```sql
+-- Example: Bulk user assignment
+INSERT INTO tenant_members (tenant_id, user_id, role)
+SELECT 
+    tenant_id,
+    unnest(user_ids) as user_id,
+    'member' as role
+FROM json_array_elements_text('["user1", "user2"]') as user_ids;
+```
+
 ## Next Steps
 
 - Implement [Custom Claims](../api/functions/update_key_claims.md)
@@ -268,6 +226,6 @@ SELECT has_tenant_access('tenant_id_here');
 
 ## Related Resources
 
-- [Multi-Tenant Guide](multi_tenant.md)
 - [API Key Patterns](api_key_patterns.md)
+- [Multi-Tenant Guide](multi_tenant.md)
 - [Security Best Practices](../api/security/rls_policies.md)

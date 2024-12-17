@@ -1,6 +1,6 @@
 # KeyHippo API Reference
 
-Complete reference documentation for KeyHippo's API.
+Production-ready API reference for fast-moving teams.
 
 ## Core Concepts
 
