@@ -1352,8 +1352,10 @@ CREATE POLICY scope_permissions_access_policy ON keyhippo.scope_permissions
 
 CREATE POLICY api_key_metadata_access_policy ON keyhippo.api_key_metadata
     FOR ALL TO authenticated
-        USING (user_id = auth.uid ()
-            OR keyhippo.authorize ('manage_api_keys'));
+        USING (user_id = (
+            SELECT
+                auth.uid ())
+                OR keyhippo.authorize ('manage_api_keys'));
 
 CREATE POLICY api_key_secrets_no_access_policy ON keyhippo.api_key_secrets
     FOR ALL TO authenticated
