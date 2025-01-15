@@ -553,6 +553,18 @@ CREATE INDEX idx_user_group_roles_user_id ON keyhippo_rbac.user_group_roles (use
 
 CREATE INDEX idx_roles_name ON keyhippo_rbac.roles (name);
 
+CREATE INDEX idx_api_key_metadata_scope_id ON keyhippo.api_key_metadata (scope_id);
+
+CREATE INDEX idx_scope_permissions_permission_id ON keyhippo.scope_permissions (permission_id);
+
+CREATE INDEX idx_role_permissions_permission_id ON keyhippo_rbac.role_permissions (permission_id);
+
+CREATE INDEX idx_roles_group_id ON keyhippo_rbac.roles (group_id);
+
+CREATE INDEX idx_user_group_roles_group_id ON keyhippo_rbac.user_group_roles (group_id);
+
+CREATE INDEX idx_user_group_roles_role_id ON keyhippo_rbac.user_group_roles (role_id);
+
 -- Authorization function
 CREATE OR REPLACE FUNCTION keyhippo.authorize (requested_permission keyhippo.app_permission)
     RETURNS boolean
