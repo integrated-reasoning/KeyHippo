@@ -720,7 +720,6 @@ BEGIN
                 id = metadata_id
                 AND (last_used_at IS NULL
                     OR last_used_at < NOW() - INTERVAL '1 minute');
-            RAISE LOG 'verify_api_key() - Updated last_used_at for api_key_metadata_id: %', metadata_id;
         ELSE
             -- Log that the UPDATE was skipped due to read-only transaction
             RAISE LOG 'verify_api_key() - Skipping last_used_at update for api_key_metadata_id: % due to read-only transaction.', metadata_id;
