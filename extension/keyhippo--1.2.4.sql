@@ -172,6 +172,7 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql
+SET search_path = pg_temp
 SECURITY DEFINER;
 
 CREATE TRIGGER keyhippo_audit_rbac_groups
@@ -257,12 +258,14 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql
+SET search_path = pg_temp
 SECURITY DEFINER;
 
 -- Function to enable the audit_log_notify trigger
 CREATE OR REPLACE FUNCTION keyhippo_internal.enable_audit_log_notify ()
     RETURNS VOID
     LANGUAGE plpgsql
+    SET search_path = pg_temp
     SECURITY DEFINER
     AS $$
 BEGIN
@@ -291,6 +294,7 @@ CREATE OR REPLACE FUNCTION keyhippo_internal.disable_audit_log_notify ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     -- Drop the trigger if it exists
@@ -314,6 +318,7 @@ CREATE OR REPLACE FUNCTION keyhippo.notify_expiring_key ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     v_endpoint text;
@@ -398,6 +403,7 @@ CREATE OR REPLACE FUNCTION keyhippo.notify_expiring_key ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 DECLARE
     v_endpoint text;
@@ -470,6 +476,7 @@ CREATE OR REPLACE FUNCTION keyhippo.update_expiring_keys ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = pg_temp
     AS $$
 BEGIN
     -- Update expires_at for keys that are about to expire
@@ -529,6 +536,7 @@ END;
 
 $$
 LANGUAGE plpgsql
+SET search_path = pg_temp
 SECURITY DEFINER;
 
 -- Create Impersonation table
@@ -579,6 +587,7 @@ CREATE OR REPLACE FUNCTION keyhippo.create_api_key (key_description text, scope_
         api_key_id uuid)
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo
     AS $$
 DECLARE
     random_bytes bytea;
@@ -641,6 +650,8 @@ CREATE OR REPLACE FUNCTION keyhippo.verify_api_key (api_key text)
         permissions text[])
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo,
+    keyhippo_rbac
     AS $$
 DECLARE
     metadata_id uuid;
@@ -797,6 +808,7 @@ CREATE OR REPLACE FUNCTION keyhippo.revoke_api_key (api_key_id uuid)
     RETURNS boolean
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo
     AS $$
 DECLARE
     success boolean;
@@ -842,6 +854,7 @@ CREATE OR REPLACE FUNCTION keyhippo.rotate_api_key (old_api_key_id uuid)
         new_api_key_id uuid)
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo
     AS $$
 DECLARE
     c_user_id uuid;
@@ -896,6 +909,7 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.create_group (p_name text, p_descriptio
     RETURNS uuid
     LANGUAGE plpgsql
     SECURITY INVOKER
+    SET search_path = keyhippo_rbac
     AS $$
 DECLARE
     v_group_id uuid;
@@ -912,6 +926,7 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.create_role (p_name text, p_description
     RETURNS uuid
     LANGUAGE plpgsql
     SECURITY INVOKER
+    SET search_path = keyhippo_rbac
     AS $$
 DECLARE
     v_role_id uuid;
@@ -928,6 +943,7 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.assign_role_to_user (p_user_id uuid, p_
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY INVOKER
+    SET search_path = keyhippo_rbac
     AS $$
 BEGIN
     INSERT INTO keyhippo_rbac.user_group_roles (user_id, group_id, role_id)
@@ -941,6 +957,7 @@ CREATE OR REPLACE FUNCTION keyhippo_rbac.assign_permission_to_role (p_role_id uu
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY INVOKER
+    SET search_path = keyhippo_rbac
     AS $$
 DECLARE
     v_permission_id uuid;
@@ -965,6 +982,7 @@ $$;
 CREATE OR REPLACE PROCEDURE keyhippo_impersonation.login_as_user (user_id uuid)
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = keyhippo_impersonation
 AS $$
 DECLARE
     auth_user auth.users%ROWTYPE;
@@ -1019,6 +1037,7 @@ $$;
 CREATE OR REPLACE PROCEDURE keyhippo_impersonation.login_as_anon ()
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = keyhippo_impersonation
 AS $$
 DECLARE
     CURRENT_ROLE NAME;
@@ -1086,6 +1105,7 @@ $$;
 CREATE OR REPLACE PROCEDURE keyhippo_impersonation.logout ()
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = keyhippo_impersonation
 AS $$
 DECLARE
     v_original_role text;
@@ -1168,7 +1188,7 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql
-VOLATILE;
+SECURITY INVOKER SET search_path = keyhippo_impersonation VOLATILE;
 
 -- Function to create a new auth.user for testing
 CREATE OR REPLACE FUNCTION keyhippo_impersonation.generate_new_user ()
@@ -1189,7 +1209,7 @@ BEGIN
 END;
 $$
 LANGUAGE plpgsql
-VOLATILE
+VOLATILE SET search_path = keyhippo_impersonation
 SECURITY DEFINER;
 
 -- Function to update claims
@@ -1197,6 +1217,7 @@ CREATE OR REPLACE FUNCTION keyhippo.update_key_claims (key_id uuid, new_claims j
     RETURNS void
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo
     AS $$
 DECLARE
     c_user_id uuid;
@@ -1399,6 +1420,7 @@ CREATE OR REPLACE FUNCTION keyhippo_internal.send_installation_notification ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo_internal
     AS $$
 DECLARE
     v_installation_uuid uuid;
@@ -1448,6 +1470,7 @@ CREATE OR REPLACE FUNCTION keyhippo.initialize_keyhippo ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo, keyhippo_internal, keyhippo_rbac
     AS $$
 DECLARE
     admin_group_id uuid;
@@ -1584,6 +1607,7 @@ CREATE OR REPLACE FUNCTION keyhippo.assign_default_role ()
     RETURNS TRIGGER
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo_rbac
     AS $$
 DECLARE
     user_group_id uuid;
@@ -1621,6 +1645,7 @@ CREATE OR REPLACE FUNCTION keyhippo.initialize_existing_project ()
     RETURNS VOID
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = keyhippo, keyhippo_rbac
     AS $$
 DECLARE
     user_record RECORD;
