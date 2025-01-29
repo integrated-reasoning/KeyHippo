@@ -17,42 +17,100 @@ KeyHippo enables API key authentication and fine-grained access control in Supab
 
 Features:
 
-- Unified RLS policies for session and API key authentication
-- Secure API key management without JWTs
-- Role-Based Access Control (RBAC) for permissions
-- Impersonation functions for administrative tasks
-- API key lifecycle management
+- **API Key Management:**
+
+  - Secure key issuance and validation
+  - Key rotation and revocation
+  - Automatic key expiration
+  - Claims-based metadata
+  - HTTP notifications for key events
+
+- **Role-Based Access Control (RBAC):**
+  - Hierarchical group-based permissions
+  - Built-in roles (admin, user)
+  - Fine-grained permission management
+  - Default role assignment for new users
 
 ## Quick Start
 
 ### Database Setup
 
-1. Install the KeyHippo extension:
+1. Create a new Supabase migration for the KeyHippo extension:
 
-```sql
-select dbdev.install('keyhippo@keyhippo');
-create extension "keyhippo@keyhippo" version '1.2.5';
+```bash
+supabase migration new add_keyhippo_extension
 ```
 
-Consult [database.dev](https://database.dev/keyhippo/keyhippo) for version updates.
+2. Copy the contents of `extension/keyhippo--1.2.5.sql` into the newly created migration file in the `supabase/migrations` directory.
 
-2. Post-installation, KeyHippo functions become accessible within your database environment.
+3. Apply the migration to install the extension:
+
+```bash
+supabase migration up
+```
+
+4. For projects with existing users:
+
+```sql
+SELECT keyhippo.initialize_existing_project();
+```
+
+This will:
+
+- Create default groups (Admin Group, User Group)
+- Create default roles (Admin, User)
+- Set up default permissions
+- Create a default scope
+- Assign the User role to existing users (when using initialize_existing_project)
 
 ## Application Integration
 
-KeyHippo functions are accessible via SQL. Use them directly in your application code or via PostgREST. All interactions with KeyHippo occur through your application's existing database interface.
+KeyHippo integrates with your Supabase application in two main ways:
 
-## Usage Examples
+1. **Direct SQL Access**: Use KeyHippo functions through your application's database connection
+2. **REST API**: Access via PostgREST endpoints (requires valid API key in x-api-key header)
 
-### API Key Generation
-
-Create an API key for the current authenticated user:
+### Key Management
 
 ```sql
+-- Generate a new API key
 SELECT * FROM keyhippo.create_api_key('Primary API Key', 'default');
+
+-- Verify an API key (internal use)
+SELECT * FROM keyhippo.verify_api_key('your-api-key');
+
+-- Get key metadata in RLS policies
+SELECT keyhippo.key_data();
+
+-- Revoke an API key
+SELECT keyhippo.revoke_api_key('key-id-uuid');
+
+-- Rotate an existing key
+SELECT * FROM keyhippo.rotate_api_key('key-id-uuid');
+
+-- Update key claims
+SELECT keyhippo.update_key_claims('key-id-uuid', '{"custom": "data"}'::jsonb);
 ```
 
-This generates a new API key with the provided description and associates it with the 'default' scope.
+### HTTP Integration
+
+KeyHippo supports HTTP notifications for:
+
+- Key expiry events
+- Audit log events
+- Installation tracking
+
+Configure endpoints through keyhippo_internal.config:
+
+```sql
+-- Set audit log endpoint
+UPDATE keyhippo_internal.config
+SET value = 'https://your-endpoint.com/audit'
+WHERE key = 'audit_log_endpoint';
+
+-- Enable HTTP logging
+SELECT keyhippo_internal.enable_audit_log_notify();
+```
 
 ### RLS Policy Implementation
 
@@ -63,12 +121,16 @@ CREATE POLICY "owner_access"
 ON "public"."resource_table"
 FOR SELECT
 USING (
-  keyhippo.current_user_context().user_id = resource_table.owner_id
+  auth.uid() = resource_table.owner_id
   AND keyhippo.authorize('manage_resources')
 );
 ```
 
-This policy grants access when the user is authenticated via a session token or a valid API key and has the 'manage_resources' permission.
+This policy grants access when:
+
+1. The user is authenticated (via session token or API key)
+2. They are the owner of the resource
+3. They have the 'manage_resources' permission
 
 ### RBAC Management
 
@@ -78,93 +140,172 @@ Create a new group, role, and assign permissions:
 -- Create a new group
 SELECT keyhippo_rbac.create_group('Developers', 'Group for developer users') AS group_id;
 
--- Create a new role
-SELECT keyhippo_rbac.create_role('Developer', 'Developer role', '<group_id>', 'user') AS role_id;
+-- Create a new role (role_type can be 'admin' or 'user')
+SELECT keyhippo_rbac.create_role('Developer', 'Developer role', group_id, 'user'::keyhippo.app_role) AS role_id;
 
--- Assign permissions to the role
-SELECT keyhippo_rbac.assign_permission_to_role('<role_id>', 'manage_resources');
+-- Assign permissions to the role (using valid app_permission enum values)
+SELECT keyhippo_rbac.assign_permission_to_role(role_id, 'manage_api_keys'::keyhippo.app_permission);
 
 -- Assign the role to a user
-SELECT keyhippo_rbac.assign_role_to_user('<user_id>', '<group_id>', '<role_id>');
+SELECT keyhippo_rbac.assign_role_to_user(auth.uid(), group_id, role_id);
 ```
+
+Available permissions:
+
+- manage_groups
+- manage_roles
+- manage_permissions
+- manage_scopes
+- manage_user_attributes
+- manage_api_keys
 
 ### Impersonation Functionality
 
-Admins can impersonate other users for administrative purposes:
+KeyHippo provides secure user impersonation for debugging purposes:
 
 ```sql
 -- Login as another user (requires postgres role)
 CALL keyhippo_impersonation.login_as_user('<user_id>');
 
--- Perform actions as the impersonated user
+-- Login as anonymous user (requires postgres role)
+CALL keyhippo_impersonation.login_as_anon();
 
--- Logout of impersonation
+-- Perform actions as the impersonated user
+-- The session will automatically expire after 1 hour
+
+-- End impersonation session
 CALL keyhippo_impersonation.logout();
 ```
 
+**Features:**
+
+- Requires postgres role for impersonation
+- Automatic session expiration (1 hour)
+- Audit logging of impersonation events
+- Support for anonymous user impersonation
+
 ## Architecture
 
-### API Key Mechanism
+### Database Schema
 
-KeyHippo generates API keys using high-entropy random data. API keys are not stored in plaintext; only their hashes are stored in the database. Even if the database is compromised, the API keys cannot be reconstructed.
+KeyHippo organizes its functionality across several schemas:
 
-**Key Points:**
+- **keyhippo**: Main schema for API key management and core functions
+- **keyhippo_rbac**: Role-Based Access Control functionality
+- **keyhippo_internal**: Internal configuration and utilities
+- **keyhippo_impersonation**: User impersonation functionality
 
-- **Unique Key Generation:** Each API key is generated using secure random data to ensure uniqueness.
-- **No Plaintext Storage:** Only the hash of the key component is stored; the plaintext key is available only upon creation.
-- **Prefix Usage:** A prefix identifies keys without exposing the full key.
-- **Secure Verification:** API keys are verified by hashing the provided key component and comparing it to the stored hash.
+### API Key Management
 
-**API Key Creation Process:**
+KeyHippo provides API key management with the following features:
 
-```mermaid
-sequenceDiagram
-    participant U as User
-    participant DB as Database
-    U->>DB: Call keyhippo.create_api_key(description, scope)
-    DB->>DB: Generate random data
-    DB->>DB: Create new API key (prefix + key)
-    DB->>DB: Hash the key component and store in keyhippo.api_key_secrets
-    DB->>DB: Store metadata in keyhippo.api_key_metadata
-    DB-->>U: Return the full API key (prefix + key)
+**Key Operations:**
 
+```sql
+-- Create a new API key
+SELECT * FROM keyhippo.create_api_key('My API Key', 'default');
+
+-- Revoke an existing key
+SELECT keyhippo.revoke_api_key('key-id-uuid');
+
+-- Rotate an existing key
+SELECT * FROM keyhippo.rotate_api_key('key-id-uuid');
+
+-- Update key claims
+SELECT keyhippo.update_key_claims('key-id-uuid', '{"custom": "data"}'::jsonb);
+```
+
+**Integration:**
+
+```sql
+-- Get current key data in RLS policies
+SELECT keyhippo.key_data();
+
+-- Check authorization in RLS policies
+SELECT keyhippo.authorize('manage_api_keys');
+
+-- Get current user context
+SELECT * FROM keyhippo.current_user_context();
 ```
 
 ## Role-Based Access Control (RBAC)
 
-KeyHippo provides an RBAC system, allowing you to define groups, roles, and permissions. This system integrates with Supabase's RLS policies, enabling fine-grained access control over your application's resources.
+KeyHippo provides a RBAC system that integrates with Postgres RLS policies:
 
 ### RBAC Components
 
-- **Groups:** Logical grouping of users.
-- **Roles:** Assigned to users within groups, defining their role type ('admin', 'user').
-- **Permissions:** Specific actions that can be granted to roles.
-- **Role Permissions:** Association between roles and permissions.
-- **User Group Roles:** Association between users, groups, and roles.
+- **Groups:** Logical grouping of users (e.g., "Admin Group", "User Group")
+- **Roles:** Assigned to users within groups, with role types:
+  - 'admin': Full system access
+  - 'user': Limited access based on assigned permissions
+- **Permissions:** Built-in permissions:
+  - manage_groups
+  - manage_roles
+  - manage_permissions
+  - manage_scopes
+  - manage_user_attributes
+  - manage_api_keys
+
+### Default Setup
+
+On initialization, KeyHippo creates:
+
+1. Default groups: "Admin Group" and "User Group"
+2. Default roles: "Admin" (admin type) and "User" (user type)
+3. Admin role gets all permissions
+4. User role gets 'manage_api_keys' permission
+5. New users automatically get the "User" role
+
+### Usage Example
+
+```sql
+-- Check if user has permission in RLS policy
+SELECT keyhippo.authorize('manage_api_keys');
+
+-- Get current user's permissions
+SELECT permissions FROM keyhippo.current_user_context();
+```
 
 ## Impersonation
 
-KeyHippo offers impersonation functionality for administrators. This allows admins to act on behalf of other users, useful for troubleshooting and support tasks.
+KeyHippo provides user impersonation functionality to assist with debugging and maintnence tasks.
 
-### Impersonation Process
+### Usage
 
-- **Login as User:** Use keyhippo_impersonation.login_as_user(user_id) to impersonate a user.
-- **Session Management:** The impersonation session is tracked, and the original role is stored.
-- **Logout:** End the impersonation session with keyhippo_impersonation.logout().
+```sql
+-- Start impersonation (requires postgres role)
+CALL keyhippo_impersonation.login_as_user('<user_id>');
+
+-- Impersonate anonymous user
+CALL keyhippo_impersonation.login_as_anon();
+
+-- End impersonation session
+CALL keyhippo_impersonation.logout();
+```
+
+### Security Controls
+
+- Only postgres role can initiate impersonation
+- Sessions automatically expire after 1 hour
+- All actions during impersonation are logged
+- Original role is preserved and restored on logout
+- State tracking prevents session manipulation
 
 ### Integration with RLS
 
-KeyHippo's authentication and authorization integrate with Supabase's Row Level Security policies. Use the keyhippo.current_user_context() function to retrieve the current user's ID, scope, and permissions within your RLS policies.
+KeyHippo's authentication and authorization integrate with Supabase's Row Level Security policies. Use auth.uid() to get the current user's ID and keyhippo.authorize() to check permissions within your RLS policies.
 
 **Example RLS Policy:**
 
 ```sql
 CREATE POLICY "user_can_view_own_data" ON "public"."user_data"
   FOR SELECT USING (
-    keyhippo.current_user_context().user_id = user_data.user_id
-    AND keyhippo.authorize('view_data')
+    auth.uid() = user_data.user_id
+    AND keyhippo.authorize('manage_api_keys')
   );
 ```
+
+Note: The example uses 'manage_api_keys' as it's one of the built-in permissions. Your application can define additional permissions as needed.
 
 ## Star History
 
@@ -178,8 +319,67 @@ We welcome community contributions. For guidance, see our Contributing Guide.
 
 KeyHippo is distributed under the MIT license. See the LICENSE file for details.
 
-## Support Channels
+## Development
 
-For technical issues or feature requests, open an issue on our GitHub repository.
+### Setting Up Development Environment
 
-For commercial support options, visit [keyhippo.com](https://keyhippo.com).
+1. Install Nix (if not already installed):
+
+For Linux/macOS (multi-user installation recommended):
+
+```bash
+sh <(curl -L https://nixos.org/nix/install) --daemon
+```
+
+For single-user installation:
+
+```bash
+sh <(curl -L https://nixos.org/nix/install) --no-daemon
+```
+
+2. Clone the repository:
+
+```bash
+git clone https://github.com/integrated-reasoning/KeyHippo.git
+cd KeyHippo
+```
+
+3. Enter the Nix development shell:
+
+```bash
+nix develop
+```
+
+4. Set up the local Supabase instance:
+
+```bash
+make setup-supabase
+```
+
+### Running Tests
+
+KeyHippo uses pgTAP for testing. To run the test suite:
+
+```bash
+# Run all tests
+make test
+
+# Run pgTAP tests specifically
+make pg_tap
+```
+
+The test suite verifies:
+
+- API key management functionality
+- RBAC system operations
+- Impersonation features
+- Security controls
+- Integration with RLS policies
+
+## Support & Community
+
+For technical support and discussions:
+
+- Open an issue on our [GitHub repository](https://github.com/integrated-reasoning/KeyHippo/issues)
+- Follow us on [Twitter](https://x.com/keyhippo) for updates
+- Visit [keyhippo.com](https://keyhippo.com)
