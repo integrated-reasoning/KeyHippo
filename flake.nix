@@ -1,5 +1,5 @@
 {
-  description = "Issue API keys for your Supabase app with one line of SQL";
+  description = "API key management and RBAC for PostgreSQL";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/master";
@@ -18,13 +18,23 @@
           overlays = [ ];
         };
         buildInputs = with pkgs; [
-          supabase-cli
+          docker-compose
+          postgresql
+          pgcli
         ];
       in
       rec
       {
         devShell = pkgs.mkShell {
           inherit buildInputs;
+          shellHook = ''
+            echo "KeyHippo development environment"
+            echo "Available commands:"
+            echo "  make setup     - Start PostgreSQL with Docker"
+            echo "  make test      - Run tests"
+            echo "  make benchmark - Run benchmarks"
+            echo "  make reset     - Reset database"
+          '';
         };
       }
     );
